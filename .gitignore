@@ -1,0 +1,51 @@
+# Dependencies - don't track installed packages
+node_modules/
+
+# Environment Variables - contains secrets (API keys, passwords)
+.env
+.env.local
+.env.production
+
+# Operating System Files
+.DS_Store        # macOS system file
+Thumbs.db        # Windows system file
+
+# Logs - generated during runtime
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build Output - compiled/transpiled code
+dist/
+build/
+
+# Next.js - build cache and static files
+.next/
+out/
+
+# React Native / Expo - build and cache files
+.expo/
+.expo-shared/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# TypeScript - build info files
+*.tsbuildinfo
+next-env.d.ts
+
+# IDE / Editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+
+# Misc
+.turbo
