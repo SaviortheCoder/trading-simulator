@@ -30,7 +30,7 @@ export default function CryptoScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
 
   // All available cryptocurrencies for trading
-  const popularCryptos = [
+const popularCryptos = [
     { symbol: 'BTC', name: 'Bitcoin', coinId: 'bitcoin' },
     { symbol: 'ETH', name: 'Ethereum', coinId: 'ethereum' },
     { symbol: 'BNB', name: 'BNB', coinId: 'binancecoin' },
@@ -39,7 +39,6 @@ export default function CryptoScreen({ navigation }: any) {
     { symbol: 'ADA', name: 'Cardano', coinId: 'cardano' },
     { symbol: 'DOGE', name: 'Dogecoin', coinId: 'dogecoin' },
     { symbol: 'DOT', name: 'Polkadot', coinId: 'polkadot' },
-    { symbol: 'MATIC', name: 'Polygon', coinId: 'matic-network' },
     { symbol: 'AVAX', name: 'Avalanche', coinId: 'avalanche-2' },
     { symbol: 'LINK', name: 'Chainlink', coinId: 'chainlink' },
     { symbol: 'UNI', name: 'Uniswap', coinId: 'uniswap' },
