@@ -7,7 +7,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt');
-const { authenticate } = require('../middleware/auth');
+const authenticate = require('../middleware/auth');
 
 // ============================================
 // POST /api/auth/register - Create new user account

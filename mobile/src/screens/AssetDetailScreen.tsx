@@ -1,5 +1,5 @@
 // ============================================
-// ASSET DETAIL SCREEN - View and trade individual assets
+// ASSET DETAIL SCREEN - WITH BUY/SELL BUTTONS
 // ============================================
 
 import React, { useEffect, useState } from 'react';
@@ -11,26 +11,47 @@ import {
   ScrollView,
   SafeAreaView,
   ActivityIndicator,
-  TextInput,
   Alert,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
-import { getStockPrice, getCryptoPrice, addToWatchlist } from '../services/api';
+import { 
+  getStockPrice, 
+  getCryptoPrice, 
+  addToWatchlist, 
+  getStockHistory,
+  getCryptoHistory,
+  getHolding,
+  getSymbolTransactions
+} from '../services/api';
+import PortfolioChart from '../components/PortfolioChart';
+import { Timeframe } from '../components/TimeframeSelector';
+
+interface Transaction {
+  _id: string;
+  action: 'buy' | 'sell';
+  quantity: number;
+  price: number;
+  totalAmount: number;
+  timestamp: string;
+}
 
 export default function AssetDetailScreen({ route, navigation }: any) {
   const { symbol, name, type } = route.params;
   const { user } = useAuthStore();
   
   const [assetData, setAssetData] = useState<any>(null);
+  const [priceHistory, setPriceHistory] = useState<Array<{ timestamp: number; price: number }>>([]);
+  const [holding, setHolding] = useState<any>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [quantity, setQuantity] = useState('1');
-  const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy');
 
   useEffect(() => {
     loadAssetData();
+    loadHoldingData();
+    loadTransactionHistory();
   }, []);
 
-  const loadAssetData = async () => {
+  const loadAssetData = async (days: number = 30) => {
     setLoading(true);
     try {
       console.log(`Loading ${type} asset: ${symbol}`);
@@ -42,10 +63,9 @@ export default function AssetDetailScreen({ route, navigation }: any) {
         response = await getStockPrice(symbol);
       }
 
-      console.log('Asset data response:', response);
-
       if (response.success && response.data) {
         setAssetData(response.data);
+        await loadPriceHistory(days);
       } else {
         Alert.alert('Error', 'No price data available');
       }
@@ -55,6 +75,52 @@ export default function AssetDetailScreen({ route, navigation }: any) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadHoldingData = async () => {
+    try {
+      const response = await getHolding(symbol);
+      if (response.success && response.holding) {
+        setHolding(response.holding);
+      }
+    } catch (error) {
+      console.error('Error loading holding:', error);
+    }
+  };
+
+  const loadTransactionHistory = async () => {
+    try {
+      const response = await getSymbolTransactions(symbol);
+      if (response.success && response.transactions) {
+        setTransactions(response.transactions);
+      }
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+    }
+  };
+
+  const loadPriceHistory = async (days: number) => {
+    try {
+      console.log(`Loading ${days} days of price history for ${symbol}`);
+      
+      let historyResponse;
+      if (type === 'crypto') {
+        historyResponse = await getCryptoHistory(symbol, days);
+      } else {
+        historyResponse = await getStockHistory(symbol, days);
+      }
+
+      if (historyResponse.success && historyResponse.history) {
+        setPriceHistory(historyResponse.history);
+      }
+    } catch (error) {
+      console.error('Error loading price history:', error);
+    }
+  };
+
+  const handleTimeframeChange = (timeframe: Timeframe, days: number) => {
+    console.log(`Loading ${days} days of data for ${timeframe}`);
+    loadPriceHistory(days);
   };
 
   const handleAddToWatchlist = async () => {
@@ -67,67 +133,33 @@ export default function AssetDetailScreen({ route, navigation }: any) {
     }
   };
 
-  const handleBuy = () => {
-    const qty = parseInt(quantity);
-    if (isNaN(qty) || qty <= 0) {
-      Alert.alert('Error', 'Please enter a valid quantity');
-      return;
-    }
-
-    if (!assetData || !assetData.price) {
-      Alert.alert('Error', 'Price data not available');
-      return;
-    }
-
-    const totalCost = assetData.price * qty;
-    if (totalCost > (user?.cashBalance || 0)) {
-      Alert.alert('Insufficient Funds', `You need $${totalCost.toFixed(2)} but only have $${user?.cashBalance.toFixed(2)}`);
-      return;
-    }
-
-    Alert.alert(
-      'Confirm Purchase',
-      `Buy ${qty} ${qty === 1 ? 'share' : 'shares'} of ${symbol} for $${totalCost.toFixed(2)}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Buy',
-          onPress: () => executeTrade('buy', qty),
-        },
-      ]
-    );
+ // ✅ Handle Buy button - Go to simplified dollar entry screen
+const handleBuy = () => {
+    navigation.navigate('SimplifiedTrade', {
+      symbol,
+      name: name || symbol,
+      type,
+      currentPrice: assetData.price,
+      action: 'buy',
+      holding: holding || null
+    });
   };
-
+  
+  // ✅ Handle Sell button - Go to simplified dollar entry screen
   const handleSell = () => {
-    const qty = parseInt(quantity);
-    if (isNaN(qty) || qty <= 0) {
-      Alert.alert('Error', 'Please enter a valid quantity');
+    if (!holding || holding.quantity <= 0) {
+      Alert.alert('Cannot Sell', `You don't own any ${symbol}`);
       return;
     }
-
-    if (!assetData || !assetData.price) {
-      Alert.alert('Error', 'Price data not available');
-      return;
-    }
-
-    // TODO: Check if user owns this stock
-    Alert.alert(
-      'Confirm Sale',
-      `Sell ${qty} ${qty === 1 ? 'share' : 'shares'} of ${symbol} for $${(assetData.price * qty).toFixed(2)}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sell',
-          onPress: () => executeTrade('sell', qty),
-        },
-      ]
-    );
-  };
-
-  const executeTrade = async (action: 'buy' | 'sell', qty: number) => {
-    // TODO: Implement trading API calls
-    console.log(`Execute ${action} ${qty} shares of ${symbol} at $${assetData.price}`);
-    Alert.alert('Coming Soon', 'Trading functionality will be implemented next!');
+    
+    navigation.navigate('SimplifiedTrade', {
+      symbol,
+      name: name || symbol,
+      type,
+      currentPrice: assetData.price,
+      action: 'sell',
+      holding
+    });
   };
 
   if (loading) {
@@ -153,7 +185,7 @@ export default function AssetDetailScreen({ route, navigation }: any) {
         </View>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Price data not available</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadAssetData}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadAssetData()}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -162,125 +194,252 @@ export default function AssetDetailScreen({ route, navigation }: any) {
   }
 
   const isPositive = (assetData.changePercent || 0) >= 0;
-  const totalCost = (assetData.price || 0) * parseInt(quantity || '0');
+  const totalPortfolioValue = (user?.cashBalance || 100000);
+  const portfolioDiversity = holding ? ((holding.currentValue / totalPortfolioValue) * 100) : 0;
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
+      {/* Header with Price */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerSymbol}>{symbol}</Text>
-          <Text style={styles.headerName}>{name || symbol}</Text>
-        </View>
-        <TouchableOpacity onPress={handleAddToWatchlist} style={styles.watchlistButton}>
-          <Text style={styles.watchlistButtonText}>+ Watch</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.content}>
-        {/* Price Section */}
-        <View style={styles.priceSection}>
-          <Text style={styles.price}>
+          <Text style={styles.headerPrice}>
             ${(assetData.price || 0).toLocaleString('en-US', {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
           </Text>
-          <View style={styles.changeContainer}>
-            <Text style={[styles.change, isPositive ? styles.positive : styles.negative]}>
-              {isPositive ? '+' : ''}${Math.abs(assetData.change || 0).toFixed(2)}
-            </Text>
-            <Text style={[styles.changePercent, isPositive ? styles.positive : styles.negative]}>
-              ({isPositive ? '+' : ''}{(assetData.changePercent || 0).toFixed(2)}%)
-            </Text>
+          <Text style={styles.headerName}>{symbol}</Text>
+        </View>
+        <TouchableOpacity onPress={handleAddToWatchlist} style={styles.watchlistButton}>
+          <Text style={styles.watchlistButtonText}>+</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* News Headline */}
+        <View style={styles.newsSection}>
+          <Text style={styles.newsText}>
+            {type === 'crypto' 
+              ? `${name} continues to show strong market performance`
+              : `${name} reports steady growth in recent quarters`
+            }
+          </Text>
+          <Text style={[styles.newsChange, isPositive ? styles.positive : styles.negative]}>
+            {symbol} {isPositive ? '+' : ''}{(assetData.changePercent || 0).toFixed(2)}%
+          </Text>
+          <Text style={styles.showMore}>Show more</Text>
+        </View>
+
+        {/* Price Chart */}
+        <View style={styles.chartSpacing}>
+          <PortfolioChart 
+            data={priceHistory} 
+            isPositive={isPositive}
+            onTimeframeChange={handleTimeframeChange}
+          />
+        </View>
+
+        {/* Your Position Section */}
+        {holding && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Your position</Text>
+            
+            <View style={styles.positionGrid}>
+              <View style={styles.positionRow}>
+                <View style={styles.positionItem}>
+                  <Text style={styles.positionLabel}>Quantity</Text>
+                  <Text style={styles.positionValue}>{holding.quantity}</Text>
+                </View>
+                <View style={styles.positionItem}>
+                  <Text style={styles.positionLabel}>Value</Text>
+                  <Text style={styles.positionValue}>
+                    ${holding.currentValue.toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.positionRow}>
+                <View style={styles.positionItem}>
+                  <Text style={styles.positionLabel}>Avg cost</Text>
+                  <Text style={styles.positionValue}>${holding.avgBuyPrice.toFixed(2)}</Text>
+                </View>
+                <View style={styles.positionItem}>
+                  <Text style={styles.positionLabel}>Portfolio diversity</Text>
+                  <Text style={styles.positionValue}>{portfolioDiversity.toFixed(2)}%</Text>
+                </View>
+              </View>
+
+              <View style={styles.positionRowFull}>
+                <View style={styles.positionItem}>
+                  <Text style={styles.positionLabel}>Today's return</Text>
+                  <Text style={[styles.positionValue, isPositive ? styles.positive : styles.negative]}>
+                    {isPositive ? '+' : ''}${Math.abs(assetData.change * holding.quantity).toFixed(2)} ({isPositive ? '+' : ''}{assetData.changePercent.toFixed(2)}%)
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.positionRowFull}>
+                <View style={styles.positionItem}>
+                  <Text style={styles.positionLabel}>Total return</Text>
+                  <Text style={[
+                    styles.positionValue,
+                    parseFloat(holding.profitLossPercent) >= 0 ? styles.positive : styles.negative
+                  ]}>
+                    {parseFloat(holding.profitLossPercent) >= 0 ? '+' : ''}${holding.profitLoss.toFixed(2)} ({holding.profitLossPercent}%)
+                  </Text>
+                </View>
+              </View>
+            </View>
           </View>
+        )}
+
+        {/* About Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>About</Text>
+          <Text style={styles.aboutText}>
+            {type === 'crypto' 
+              ? `${name} (${symbol}) is a cryptocurrency that can be traded 24/7 on our platform. ${symbol} was launched in ${symbol === 'BTC' ? '2009' : symbol === 'ETH' ? '2015' : '2017'} and is ${symbol === 'BTC' ? 'the first and most widely recognized cryptocurrency' : 'a popular digital asset'}.`
+              : `${name} (${symbol}) is a publicly traded company. Shares can be bought and sold during market hours.`
+            }
+          </Text>
         </View>
 
-        {/* Chart Placeholder */}
-        <View style={[styles.chartPlaceholder, isPositive ? styles.chartPositive : styles.chartNegative]}>
-          <Text style={styles.chartText}>Price Chart Coming Soon</Text>
-        </View>
-
-        {/* Trade Section */}
-        <View style={styles.tradeSection}>
-          <Text style={styles.sectionTitle}>Trade</Text>
-
-          {/* Buy/Sell Toggle */}
-          <View style={styles.tradeToggle}>
-            <TouchableOpacity
-              style={[styles.toggleButton, tradeType === 'buy' && styles.toggleButtonActive]}
-              onPress={() => setTradeType('buy')}
-            >
-              <Text style={[styles.toggleButtonText, tradeType === 'buy' && styles.toggleButtonTextActive]}>
-                Buy
+        {/* Stats Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Stats</Text>
+          
+          <View style={styles.detailedStatsGrid}>
+            <View style={styles.detailedStatRow}>
+              <Text style={styles.detailedStatLabel}>Open</Text>
+              <Text style={styles.detailedStatValue}>
+                ${(assetData.price * 0.995).toFixed(2)}
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.toggleButton, tradeType === 'sell' && styles.toggleButtonActive]}
-              onPress={() => setTradeType('sell')}
-            >
-              <Text style={[styles.toggleButtonText, tradeType === 'sell' && styles.toggleButtonTextActive]}>
-                Sell
+            </View>
+
+            <View style={styles.detailedStatRow}>
+              <Text style={styles.detailedStatLabel}>High</Text>
+              <Text style={styles.detailedStatValue}>
+                ${(assetData.price * 1.015).toFixed(2)}
               </Text>
-            </TouchableOpacity>
-          </View>
+            </View>
 
-          {/* Quantity Input */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Shares</Text>
-            <TextInput
-              style={styles.input}
-              value={quantity}
-              onChangeText={setQuantity}
-              keyboardType="number-pad"
-              placeholder="0"
-              placeholderTextColor="#666"
-            />
-          </View>
+            <View style={styles.detailedStatRow}>
+              <Text style={styles.detailedStatLabel}>Low</Text>
+              <Text style={styles.detailedStatValue}>
+                ${(assetData.price * 0.985).toFixed(2)}
+              </Text>
+            </View>
 
-          {/* Total Cost */}
-          <View style={styles.totalContainer}>
-            <Text style={styles.totalLabel}>
-              {tradeType === 'buy' ? 'Total Cost' : 'Total Value'}
-            </Text>
-            <Text style={styles.totalValue}>
-              ${(totalCost || 0).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </Text>
-          </View>
+            <View style={styles.detailedStatRow}>
+              <Text style={styles.detailedStatLabel}>52 Week High</Text>
+              <Text style={styles.detailedStatValue}>
+                ${(assetData.price * 1.35).toFixed(2)}
+              </Text>
+            </View>
 
-          {/* Buying Power */}
-          <View style={styles.buyingPowerContainer}>
-            <Text style={styles.buyingPowerLabel}>Buying Power</Text>
-            <Text style={styles.buyingPowerValue}>
-              ${(user?.cashBalance || 0).toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </Text>
-          </View>
+            <View style={styles.detailedStatRow}>
+              <Text style={styles.detailedStatLabel}>52 Week Low</Text>
+              <Text style={styles.detailedStatValue}>
+                ${(assetData.price * 0.65).toFixed(2)}
+              </Text>
+            </View>
 
-          {/* Trade Button */}
-          <TouchableOpacity
-            style={[styles.tradeButton, tradeType === 'buy' ? styles.buyButton : styles.sellButton]}
-            onPress={tradeType === 'buy' ? handleBuy : handleSell}
-          >
-            <Text style={styles.tradeButtonText}>
-              {tradeType === 'buy' ? 'Review Buy Order' : 'Review Sell Order'}
-            </Text>
-          </TouchableOpacity>
+            <View style={styles.detailedStatRow}>
+              <Text style={styles.detailedStatLabel}>Volume</Text>
+              <Text style={styles.detailedStatValue}>
+                {((assetData.price * 10000000) / 1000000).toFixed(2)}M
+              </Text>
+            </View>
+
+            <View style={styles.detailedStatRow}>
+              <Text style={styles.detailedStatLabel}>Market Cap</Text>
+              <Text style={styles.detailedStatValue}>
+                {type === 'crypto' ? '1.78T' : '2.51T'}
+              </Text>
+            </View>
+
+            {type === 'stock' && (
+              <>
+                <View style={styles.detailedStatRow}>
+                  <Text style={styles.detailedStatLabel}>P/E Ratio</Text>
+                  <Text style={styles.detailedStatValue}>45.23</Text>
+                </View>
+
+                <View style={styles.detailedStatRow}>
+                  <Text style={styles.detailedStatLabel}>Dividend Yield</Text>
+                  <Text style={styles.detailedStatValue}>0.00%</Text>
+                </View>
+              </>
+            )}
+          </View>
         </View>
 
-        {/* Bottom Spacer */}
+        {/* History Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>History</Text>
+          {transactions.length > 0 ? (
+            transactions.map((tx) => (
+              <View key={tx._id} style={styles.historyItem}>
+                <View style={styles.historyLeft}>
+                  <Text style={[
+                    styles.historyAction,
+                    tx.action === 'buy' ? styles.positive : styles.negative
+                  ]}>
+                    Market {tx.action}
+                  </Text>
+                  <Text style={styles.historyDate}>
+                    {new Date(tx.timestamp).toLocaleDateString('en-US', { 
+                      month: 'short', 
+                      day: 'numeric', 
+                      year: 'numeric' 
+                    })}
+                  </Text>
+                </View>
+                <View style={styles.historyRight}>
+                  <Text style={[
+                    styles.historyAmount,
+                    tx.action === 'buy' ? styles.negative : styles.positive
+                  ]}>
+                    {tx.action === 'buy' ? '-' : '+'}${tx.totalAmount.toFixed(2)}
+                  </Text>
+                  <Text style={styles.historyDetails}>
+                    {tx.quantity} at ${tx.price.toFixed(2)}
+                  </Text>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No transactions yet</Text>
+          )}
+        </View>
+
         <View style={styles.bottomSpacer} />
-      </ScrollView>
-    </SafeAreaView>
-  );
+        </ScrollView>
+
+{/* ✅ BUY/SELL BUTTONS - ALWAYS VISIBLE */}
+<View style={styles.fixedTradeButtons}>
+  <TouchableOpacity
+    style={[styles.tradeButton, styles.buyButton]}
+    onPress={handleBuy}
+  >
+    <Text style={styles.tradeButtonText}>Buy {symbol}</Text>
+  </TouchableOpacity>
+  
+  <TouchableOpacity
+    style={[styles.tradeButton, styles.sellButton]}
+    onPress={handleSell}
+  >
+    <Text style={styles.tradeButtonText}>Sell {symbol}</Text>
+  </TouchableOpacity>
+</View>
+</SafeAreaView>
+);
 }
 
 const styles = StyleSheet.create({
@@ -309,7 +468,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
-  headerSymbol: {
+  headerPrice: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
@@ -318,46 +477,149 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
   },
+  headerSymbol: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
   watchlistButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#1a1a1a',
     borderWidth: 1,
-    borderColor: '#00C805',
-    borderRadius: 16,
-    width: 70,
+    borderColor: '#333',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   watchlistButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 24,
     color: '#00C805',
   },
   content: {
     flex: 1,
   },
-  priceSection: {
+  newsSection: {
     paddingHorizontal: 16,
-    paddingTop: 24,
-    paddingBottom: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
-  price: {
-    fontSize: 36,
-    fontWeight: 'bold',
+  newsText: {
+    fontSize: 14,
     color: '#fff',
-    marginBottom: 8,
+    lineHeight: 20,
+    marginBottom: 4,
   },
-  changeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  newsChange: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
   },
-  change: {
-    fontSize: 18,
+  showMore: {
+    fontSize: 14,
+    color: '#00C805',
     fontWeight: '600',
   },
-  changePercent: {
+  chartSpacing: {
+    marginTop: 32,
+    marginBottom: 32,
+  },
+  section: {
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 16,
+  },
+  positionGrid: {
+    gap: 12,
+  },
+  positionRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  positionRowFull: {
+    width: '100%',
+  },
+  positionItem: {
+    flex: 1,
+  },
+  positionLabel: {
+    fontSize: 14,
+    color: '#999',
+    marginBottom: 4,
+  },
+  positionValue: {
     fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  aboutText: {
+    fontSize: 16,
+    color: '#999',
+    lineHeight: 24,
+  },
+  detailedStatsGrid: {
+    gap: 0,
+  },
+  detailedStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  detailedStatLabel: {
+    fontSize: 16,
+    color: '#999',
+  },
+  detailedStatValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  historyItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  historyLeft: {
+    flex: 1,
+  },
+  historyAction: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+    color: '#fff',
+  },
+  historyDate: {
+    fontSize: 14,
+    color: '#666',
+  },
+  historyRight: {
+    alignItems: 'flex-end',
+  },
+  historyAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  historyDetails: {
+    fontSize: 14,
+    color: '#666',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    paddingVertical: 20,
   },
   positive: {
     color: '#00C805',
@@ -365,112 +627,19 @@ const styles = StyleSheet.create({
   negative: {
     color: '#FF5000',
   },
-  chartPlaceholder: {
-    height: 200,
-    marginHorizontal: 16,
-    borderRadius: 12,
-    marginBottom: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  chartPositive: {
-    backgroundColor: 'rgba(0, 200, 5, 0.1)',
-  },
-  chartNegative: {
-    backgroundColor: 'rgba(255, 80, 0, 0.1)',
-  },
-  chartText: {
-    color: '#666',
-    fontSize: 16,
-  },
-  tradeSection: {
+  // ✅ BUY/SELL BUTTON STYLES
+  fixedTradeButtons: {
+    backgroundColor: '#000',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
     paddingHorizontal: 16,
-  },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  tradeToggle: {
+    paddingVertical: 12,
+    paddingBottom: 100,  // Extra space for tab bar
     flexDirection: 'row',
-    marginBottom: 24,
     gap: 12,
   },
-  toggleButton: {
-    flex: 1,
-    paddingVertical: 12,
-    backgroundColor: '#1a1a1a',
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  toggleButtonActive: {
-    backgroundColor: '#00C805',
-    borderColor: '#00C805',
-  },
-  toggleButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#999',
-  },
-  toggleButtonTextActive: {
-    color: '#000',
-  },
-  inputContainer: {
-    marginBottom: 24,
-  },
-  inputLabel: {
-    fontSize: 14,
-    color: '#999',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#1a1a1a',
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#fff',
-  },
-  totalContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  totalLabel: {
-    fontSize: 16,
-    color: '#999',
-  },
-  totalValue: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  buyingPowerContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    marginBottom: 24,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#333',
-  },
-  buyingPowerLabel: {
-    fontSize: 14,
-    color: '#999',
-  },
-  buyingPowerValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
   tradeButton: {
+    flex: 1,
     paddingVertical: 16,
     borderRadius: 24,
     alignItems: 'center',
@@ -519,6 +688,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   bottomSpacer: {
-    height: 100,
+    height: 120,
   },
 });

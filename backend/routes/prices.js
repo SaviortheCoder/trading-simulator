@@ -4,6 +4,7 @@
 
 const express = require('express');
 const router = express.Router();
+const priceCache = require('../services/priceCache');
 const {
   getStockPrice,
   getCryptoPrice,
@@ -61,30 +62,38 @@ router.get('/crypto/:symbol', async (req, res) => {
 // ============================================
 
 router.post('/bulk', async (req, res) => {
-  try {
-    const { symbols } = req.body;
+    try {
+      const { symbols } = req.body;
+      
+      if (!symbols || !Array.isArray(symbols)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Symbols array is required'
+        });
+      }
+  
+      // Normalize symbols - handle both string[] and {symbol, type}[]
+      const normalizedSymbols = symbols.map(s => {
+        if (typeof s === 'string') {
+          return { symbol: s, type: 'stock' };
+        }
+        return s;
+      });
+  
+      const prices = await getBulkPrices(normalizedSymbols);
 
-    if (!Array.isArray(symbols) || symbols.length === 0) {
-      return res.status(400).json({
+      res.json({
+        success: true,
+        prices
+      });
+    } catch (error) {
+      console.error('Bulk price error:', error.message);
+      res.status(500).json({
         success: false,
-        error: 'Symbols array is required',
+        error: 'Failed to fetch bulk prices'
       });
     }
-
-    const prices = await getBulkPrices(symbols);
-
-    res.json({
-      success: true,
-      prices,
-    });
-  } catch (error) {
-    console.error('Bulk price error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch prices',
-    });
-  }
-});
+  });
 
 // ============================================
 // GET /api/prices/search/:query - Search stocks (cached)

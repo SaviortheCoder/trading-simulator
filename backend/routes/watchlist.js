@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const Watchlist = require('../models/Watchlist');
-const { authenticate } = require('../middleware/auth');
+const authenticate = require('../middleware/auth');
 
 // Popular stocks to initialize watchlist (reduced to 15 for reliability)
 const POPULAR_STOCKS = [

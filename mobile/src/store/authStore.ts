@@ -1,7 +1,6 @@
 // ============================================
 // AUTH STORE - Global authentication state
 // ============================================
-
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -24,6 +23,7 @@ interface AuthState {
   isAuthenticated: boolean;
   
   setAuth: (user: User, accessToken: string, refreshToken: string) => Promise<void>;
+  setUser: (user: User) => Promise<void>;  // ← ADDED THIS
   clearAuth: () => Promise<void>;
   updateUser: (user: Partial<User>) => Promise<void>;
   loadFromStorage: () => Promise<void>;
@@ -39,7 +39,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     await AsyncStorage.setItem('user', JSON.stringify(user));
     await AsyncStorage.setItem('accessToken', accessToken);
     await AsyncStorage.setItem('refreshToken', refreshToken);
-
     set({
       user,
       accessToken,
@@ -48,9 +47,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
 
+  // ← ADDED THIS FUNCTION
+  setUser: async (user) => {
+    await AsyncStorage.setItem('user', JSON.stringify(user));
+    set({ user });
+  },
+
   clearAuth: async () => {
     await AsyncStorage.multiRemove(['user', 'accessToken', 'refreshToken']);
-
     set({
       user: null,
       accessToken: null,
@@ -62,10 +66,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   updateUser: async (updatedUser) => {
     set((state) => {
       if (!state.user) return state;
-
       const newUser = { ...state.user, ...updatedUser };
       AsyncStorage.setItem('user', JSON.stringify(newUser));
-
       return { user: newUser };
     });
   },
@@ -75,7 +77,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const userStr = await AsyncStorage.getItem('user');
       const accessToken = await AsyncStorage.getItem('accessToken');
       const refreshToken = await AsyncStorage.getItem('refreshToken');
-
+      
       if (userStr && accessToken && refreshToken) {
         const user = JSON.parse(userStr);
         set({

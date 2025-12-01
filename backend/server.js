@@ -209,10 +209,11 @@ app.get('/', (req, res) => {
         logout: 'POST /api/auth/logout',
         me: 'GET /api/auth/me'
       },
-      portfolio: '/api/portfolio/* (coming soon)',
-      trade: '/api/trade/* (coming soon)',
-      prices: '/api/prices/* (coming soon)',
-      watchlist: '/api/watchlist/* (coming soon)'
+      portfolio: '/api/portfolio/*',
+      trade: '/api/trade/*',
+      prices: '/api/prices/*',
+      watchlist: '/api/watchlist/*',
+      historical: '/api/historical/*'
     },
     documentation: 'Coming soon...',
     timestamp: new Date().toISOString()
@@ -248,39 +249,24 @@ app.get('/api/status', (req, res) => {
 // IMPORT ROUTES
 // ============================================
 
-// Authentication routes
 const authRoutes = require('./routes/auth');
+const priceRoutes = require('./routes/prices');
+const tradeRoutes = require('./routes/trade');
+const portfolioRoutes = require('./routes/portfolio');
+const watchlistRoutes = require('./routes/watchlist');
+const authMiddleware = require('./middleware/auth');
+const historicalRoutes = require('./routes/historical');
 
 // ============================================
 // USE ROUTES
 // ============================================
 
-// Mount auth routes at /api/auth
 app.use('/api/auth', authRoutes);
-
-// Price routes
-const priceRoutes = require('./routes/prices');
 app.use('/api/prices', priceRoutes);
-
-// TODO: Add more routes as we build them
-// const portfolioRoutes = require('./routes/portfolio');
-// const tradeRoutes = require('./routes/trade');
-// const priceRoutes = require('./routes/prices');
-// const watchlistRoutes = require('./routes/watchlist');
-
-// app.use('/api/portfolio', portfolioRoutes);
-// app.use('/api/trade', tradeRoutes);
-// app.use('/api/prices', priceRoutes);
-// app.use('/api/watchlist', watchlistRoutes);
-
-// Portfolio routes
-const portfolioRoutes = require('./routes/portfolio');
-app.use('/api/portfolio', portfolioRoutes);
-
-// Watchlist routes
-const watchlistRoutes = require('./routes/watchlist');
-app.use('/api/watchlist', watchlistRoutes);
-
+app.use('/api/trade', authMiddleware, tradeRoutes);
+app.use('/api/portfolio', authMiddleware, portfolioRoutes);
+app.use('/api/watchlist', authMiddleware, watchlistRoutes);
+app.use('/api/historical', authMiddleware, historicalRoutes);
 
 // ============================================
 // ERROR HANDLING - Catch-all error handlers
@@ -298,7 +284,8 @@ app.use((req, res, next) => {
       root: 'GET /',
       health: 'GET /health',
       status: 'GET /api/status',
-      auth: 'POST /api/auth/register, POST /api/auth/login, etc.'
+      auth: 'POST /api/auth/register, POST /api/auth/login, etc.',
+      historical: 'GET /api/historical/portfolio, GET /api/historical/stock/:symbol, etc.'
     },
     timestamp: new Date().toISOString()
   });
@@ -333,13 +320,14 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3001;
 
 // Try to start server on specified port
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
 ║  🚀 Trading Simulator Server Started Successfully!        ║
 ║                                                            ║
 ║  📡 Server running on: http://localhost:${PORT}             ║
+║  📱 Mobile access: http://10.0.0.5:${PORT}                  ║
 ║  🔌 WebSocket ready for connections                        ║
 ║  📊 Environment: ${(process.env.NODE_ENV || 'development').padEnd(37)} ║
 ║  📦 Database: ${mongoose.connection.name ? mongoose.connection.name.padEnd(43) : 'connecting...'.padEnd(43)} ║
@@ -348,11 +336,12 @@ server.listen(PORT, () => {
 ║  • GET  /              - API information                   ║
 ║  • GET  /health        - Health check                      ║
 ║  • GET  /api/status    - Detailed status                   ║
-║  • POST /api/auth/register - Create account                ║
-║  • POST /api/auth/login    - Login                         ║
-║  • POST /api/auth/refresh  - Refresh token                 ║
-║  • POST /api/auth/logout   - Logout                        ║
-║  • GET  /api/auth/me       - Get current user              ║
+║  • POST /api/auth/*    - Authentication                    ║
+║  • GET  /api/prices/*  - Price data                        ║
+║  • POST /api/trade/*   - Trading operations                ║
+║  • GET  /api/portfolio/* - Portfolio data                  ║
+║  • GET  /api/watchlist/* - Watchlist operations            ║
+║  • GET  /api/historical/* - Historical price data          ║
 ║                                                            ║
 ║  Press Ctrl+C to stop the server                           ║
 ║                                                            ║

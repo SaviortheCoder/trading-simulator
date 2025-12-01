@@ -281,28 +281,39 @@ async function getCryptoPrice(symbol) {
 // ============================================
 
 async function getBulkPrices(symbols) {
-    const results = {};
+    const results = [];
     
-    // Separate stocks and cryptos
+    // Separate stocks and cryptos based on type property
     const stocks = [];
     const cryptos = [];
     
-    symbols.forEach((symbol) => {
-      if (Object.keys(CRYPTO_MAPPING).includes(symbol.toUpperCase())) {
-        cryptos.push(symbol);
-      } else {
-        stocks.push(symbol);
-      }
-    });
+    symbols.forEach((item) => {
+        // Handle both string and object formats
+        const symbolStr = typeof item === 'string' ? item : item.symbol;
+        const type = typeof item === 'string' ? 'stock' : (item.type || 'stock');
+        
+        // Determine if crypto by type OR by checking if it's in CRYPTO_MAPPING
+        const isCrypto = type === 'crypto' || 
+                         Object.keys(CRYPTO_MAPPING).includes(symbolStr.toUpperCase());
+        
+        if (isCrypto) {
+          cryptos.push(symbolStr);
+        } else {
+          stocks.push(symbolStr);
+        }
+      });
     
     // Load stocks in parallel (Finnhub can handle it)
     await Promise.all(
       stocks.map(async (symbol) => {
         try {
-          results[symbol] = await getStockPrice(symbol);
+          const data = await getStockPrice(symbol);
+          results.push({
+            symbol: symbol.toUpperCase(),
+            ...data,
+          });
         } catch (error) {
           console.error(`Error fetching ${symbol}:`, error.message);
-          results[symbol] = null;
         }
       })
     );
@@ -318,19 +329,18 @@ async function getBulkPrices(symbols) {
         cryptos.forEach(symbol => {
           const symbolUpper = symbol.toUpperCase();
           if (cryptoResults[symbolUpper]) {
-            results[symbol] = {
+            results.push({
+              symbol: symbolUpper,
               ...cryptoResults[symbolUpper],
               cached: false,
               cacheAge: 0,
-            };
+            });
             
             // Cache it
             cache.crypto.set(symbolUpper, {
               data: cryptoResults[symbolUpper],
               timestamp: now,
             });
-          } else {
-            results[symbol] = null;
           }
         });
       } catch (error) {
@@ -341,14 +351,13 @@ async function getBulkPrices(symbols) {
           const cached = cache.crypto.get(symbol.toUpperCase());
           if (cached) {
             console.log(`₿ [CACHE FALLBACK] ${symbol}`);
-            results[symbol] = {
+            results.push({
+              symbol: symbol.toUpperCase(),
               ...cached.data,
               cached: true,
               stale: true,
               cacheAge: Math.floor((Date.now() - cached.timestamp) / 1000),
-            };
-          } else {
-            results[symbol] = null;
+            });
           }
         });
       }

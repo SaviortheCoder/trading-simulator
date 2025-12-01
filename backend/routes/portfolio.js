@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const Portfolio = require('../models/Portfolio');
-const { authenticate } = require('../middleware/auth');
+const authenticate = require('../middleware/auth');
 
 // ============================================
 // GET /api/portfolio - Get user's portfolio
