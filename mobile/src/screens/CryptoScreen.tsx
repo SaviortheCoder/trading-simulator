@@ -1,33 +1,30 @@
 // ============================================
-// CRYPTO SCREEN - Browse cryptocurrencies
+// CRYPTO SCREEN - ENHANCED WITH COLLAPSEABLE HOLDINGS
+// Fixed import path, collapseable section, better error handling
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  RefreshControl,
   ActivityIndicator,
   SafeAreaView,
-  RefreshControl,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { getBulkPrices, getHoldings, getCryptoPortfolioHistory, getAssetHistory } from '../services/api';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { 
+  getHoldings, 
+  getCryptoPortfolioHistory, 
+  getBulkPrices,
+  getAssetHistory 
+} from '../services/api';
 import PortfolioChart from '../components/PortfolioChart';
 import Sparkline from '../components/Sparkline';
 import { Timeframe } from '../components/TimeframeSelector';
-
-interface Crypto {
-  symbol: string;
-  name: string;
-  coinId: string;
-  price?: number;
-  change?: number;
-  changePercent?: number;
-  history?: number[];
-}
+import { formatCurrency, formatPercent, formatCryptoQuantity } from '../utils/formatUtils';  // ✅ FIXED PATH
 
 interface Holding {
   symbol: string;
@@ -39,33 +36,51 @@ interface Holding {
   currentValue: number;
   profitLoss: number;
   profitLossPercent: string;
+  todaysReturn?: number;
+  todaysReturnPercent?: string;
+  totalReturn?: number;
+  totalReturnPercent?: string;
 }
 
-export default function CryptoScreen({ navigation }: any) {
-  const [cryptos, setCryptos] = useState<Crypto[]>([]);
+interface CryptoPrice {
+  symbol: string;
+  name: string;
+  price: number;
+  changePercent: number;
+  history?: number[];
+}
+
+// All available cryptocurrencies
+const CRYPTO_LIST = [
+  { symbol: 'BTC', name: 'Bitcoin' },
+  { symbol: 'ETH', name: 'Ethereum' },
+  { symbol: 'BNB', name: 'BNB' },
+  { symbol: 'SOL', name: 'Solana' },
+  { symbol: 'XRP', name: 'Ripple' },
+  { symbol: 'ADA', name: 'Cardano' },
+  { symbol: 'DOGE', name: 'Dogecoin' },
+  { symbol: 'DOT', name: 'Polkadot' },
+  { symbol: 'AVAX', name: 'Avalanche' },
+  { symbol: 'LINK', name: 'Chainlink' },
+  { symbol: 'UNI', name: 'Uniswap' },
+  { symbol: 'LTC', name: 'Litecoin' },
+  { symbol: 'ATOM', name: 'Cosmos' },
+  { symbol: 'TRX', name: 'TRON' },
+];
+
+const CryptoScreen = () => {
+  const navigation = useNavigation<any>();
+  
+  const [cryptos, setCryptos] = useState<CryptoPrice[]>([]);
   const [cryptoHoldings, setCryptoHoldings] = useState<Holding[]>([]);
   const [portfolioHistory, setPortfolioHistory] = useState<Array<{ timestamp: number; price: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingChart, setLoadingChart] = useState(true);
-
-  // All available cryptocurrencies for trading
-  const popularCryptos = [
-    { symbol: 'BTC', name: 'Bitcoin', coinId: 'bitcoin' },
-    { symbol: 'ETH', name: 'Ethereum', coinId: 'ethereum' },
-    { symbol: 'BNB', name: 'BNB', coinId: 'binancecoin' },
-    { symbol: 'SOL', name: 'Solana', coinId: 'solana' },
-    { symbol: 'XRP', name: 'Ripple', coinId: 'ripple' },
-    { symbol: 'ADA', name: 'Cardano', coinId: 'cardano' },
-    { symbol: 'DOGE', name: 'Dogecoin', coinId: 'dogecoin' },
-    { symbol: 'DOT', name: 'Polkadot', coinId: 'polkadot' },
-    { symbol: 'AVAX', name: 'Avalanche', coinId: 'avalanche-2' },
-    { symbol: 'LINK', name: 'Chainlink', coinId: 'chainlink' },
-    { symbol: 'UNI', name: 'Uniswap', coinId: 'uniswap' },
-    { symbol: 'LTC', name: 'Litecoin', coinId: 'litecoin' },
-    { symbol: 'ATOM', name: 'Cosmos', coinId: 'cosmos' },
-    { symbol: 'TRX', name: 'TRON', coinId: 'tron' },
-  ];
+  
+  // ✅ NEW: Collapseable state
+  const [holdingsExpanded, setHoldingsExpanded] = useState(true);
+  const [visibleCryptoCount, setVisibleCryptoCount] = useState(5);
 
   useFocusEffect(
     useCallback(() => {
@@ -80,15 +95,14 @@ export default function CryptoScreen({ navigation }: any) {
     try {
       console.log('🔄 Loading crypto data...');
       
-      // Load crypto holdings FIRST
+      // Load crypto holdings
       let cryptoOnly: Holding[] = [];
       try {
         const holdingsResponse = await getHoldings();
-        console.log('📊 Holdings response:', holdingsResponse);
         
         if (holdingsResponse.success) {
           cryptoOnly = (holdingsResponse.holdings || []).filter((h: Holding) => h.type === 'crypto');
-          console.log('₿ Crypto holdings found:', cryptoOnly.length, cryptoOnly.map(h => h.symbol));
+          console.log('₿ Crypto holdings found:', cryptoOnly.length);
           setCryptoHoldings(cryptoOnly);
         }
       } catch (error) {
@@ -97,54 +111,54 @@ export default function CryptoScreen({ navigation }: any) {
 
       // Load crypto portfolio history if user has crypto
       if (cryptoOnly.length > 0) {
-        console.log('📈 Loading crypto portfolio history...');
         try {
+          console.log('📈 Loading crypto portfolio history...');
           const historyResponse = await getCryptoPortfolioHistory(days);
-          console.log('📊 Portfolio history response:', historyResponse);
           
-          if (historyResponse.success && historyResponse.history) {
-            console.log('✅ Portfolio history loaded:', historyResponse.history.length, 'data points');
+          if (historyResponse.success && historyResponse.history && historyResponse.history.length > 0) {
+            console.log('✅ Portfolio history loaded:', historyResponse.history.length, 'points');
             setPortfolioHistory(historyResponse.history);
           } else {
-            console.log('⚠️ No portfolio history data');
+            console.log('⚠️ No portfolio history data available');
+            setPortfolioHistory([]);
           }
         } catch (error) {
           console.error('❌ Error loading crypto portfolio history:', error);
+          setPortfolioHistory([]);
         }
       } else {
-        console.log('ℹ️ No crypto holdings - skipping portfolio chart');
+        console.log('ℹ️ No crypto holdings - skipping portfolio history');
+        setPortfolioHistory([]);
       }
       setLoadingChart(false);
       
-      // Get all symbols with type
-      const symbols = popularCryptos.map(c => ({
+      // Get all crypto symbols
+      const symbols = CRYPTO_LIST.map(c => ({
         symbol: c.symbol,
         type: 'crypto'
       }));
       
-      // Load all prices at once using bulk endpoint
+      // Load all prices using api.ts
       console.log('💰 Loading crypto prices...');
       const response = await getBulkPrices(symbols);
       
       if (response.success && response.prices) {
         console.log('✅ Prices loaded for', response.prices.length, 'cryptos');
         
-        const cryptoData = popularCryptos.map(crypto => {
+        const cryptoData = CRYPTO_LIST.map(crypto => {
           const priceData = response.prices.find((p: any) => p.symbol === crypto.symbol);
           
           return {
             symbol: crypto.symbol,
             name: crypto.name,
-            coinId: crypto.coinId,
-            price: priceData?.price,
-            change: priceData?.change,
-            changePercent: priceData?.changePercent,
+            price: priceData?.price || 0,
+            changePercent: priceData?.changePercent || 0,
           };
         });
         
         setCryptos(cryptoData);
 
-        // Load sparklines for each crypto
+        // Load sparklines
         await loadSparklines(cryptoData);
       }
     } catch (error) {
@@ -154,8 +168,10 @@ export default function CryptoScreen({ navigation }: any) {
     }
   };
 
-  const loadSparklines = async (cryptoList: Crypto[]) => {
-    const sparklinePromises = cryptoList.map(async (crypto) => {
+  const loadSparklines = async (cryptoList: CryptoPrice[]) => {
+    const visibleCryptos = cryptoList.slice(0, visibleCryptoCount);
+    
+    const sparklinePromises = visibleCryptos.map(async (crypto) => {
       try {
         const response = await getAssetHistory(crypto.symbol, 'crypto', 7);
         if (response.success && response.history) {
@@ -184,7 +200,7 @@ export default function CryptoScreen({ navigation }: any) {
   };
 
   const handleTimeframeChange = (timeframe: Timeframe, days: number) => {
-    console.log(`📅 Loading ${days} days of crypto portfolio data for ${timeframe}`);
+    console.log(`Loading ${days} days of crypto portfolio data`);
     loadCryptos(days);
   };
 
@@ -194,8 +210,7 @@ export default function CryptoScreen({ navigation }: any) {
     setRefreshing(false);
   };
 
-  const handleCryptoPress = (crypto: Crypto) => {
-    console.log('Navigating to crypto:', crypto.symbol, crypto.name);
+  const handleCryptoPress = (crypto: CryptoPrice) => {
     navigation.navigate('AssetDetail', { 
       symbol: crypto.symbol, 
       name: crypto.name,
@@ -203,21 +218,30 @@ export default function CryptoScreen({ navigation }: any) {
     });
   };
 
-  const renderCryptoItem = ({ item }: { item: Crypto }) => {
-    const isPositive = (item.changePercent || 0) >= 0;
+  // ✅ NEW: Load more cryptos
+  const handleLoadMore = async () => {
+    const newCount = Math.min(visibleCryptoCount + 5, cryptos.length);
+    setVisibleCryptoCount(newCount);
+    
+    // Load sparklines for newly visible cryptos
+    await loadSparklines(cryptos);
+  };
+
+  const renderCryptoItem = ({ item }: { item: CryptoPrice }) => {
+    const isPositive = item.changePercent >= 0;
 
     return (
       <TouchableOpacity
         style={styles.cryptoItem}
         onPress={() => handleCryptoPress(item)}
       >
-        <View style={styles.cryptoLeft}>
+        <View style={styles.cryptoInfo}>
           <Text style={styles.cryptoSymbol}>{item.symbol}</Text>
           <Text style={styles.cryptoName}>{item.name}</Text>
         </View>
 
         <View style={styles.cryptoRight}>
-          {item.price ? (
+          {item.price > 0 ? (
             <>
               <View style={styles.sparklineWrapper}>
                 {item.history && item.history.length > 0 && (
@@ -231,13 +255,10 @@ export default function CryptoScreen({ navigation }: any) {
               </View>
               <View style={styles.priceInfo}>
                 <Text style={styles.cryptoPrice}>
-                  ${item.price.toLocaleString('en-US', { 
-                    minimumFractionDigits: 2, 
-                    maximumFractionDigits: 2 
-                  })}
+                  {formatCurrency(item.price)}
                 </Text>
                 <Text style={[styles.cryptoChange, isPositive ? styles.positive : styles.negative]}>
-                  {isPositive ? '+' : ''}{item.changePercent?.toFixed(2)}%
+                  {formatPercent(item.changePercent)}
                 </Text>
               </View>
             </>
@@ -255,14 +276,6 @@ export default function CryptoScreen({ navigation }: any) {
   const cryptoProfitLoss = cryptoPortfolioValue - cryptoInitialValue;
   const isPortfolioPositive = cryptoProfitLoss >= 0;
 
-  console.log('🎨 Render state:', {
-    hasCryptoHoldings: cryptoHoldings.length > 0,
-    portfolioHistoryLength: portfolioHistory.length,
-    loadingChart,
-    cryptoPortfolioValue,
-    cryptoHoldings: cryptoHoldings.map(h => `${h.symbol}: ${h.quantity}`)
-  });
-
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -278,30 +291,25 @@ export default function CryptoScreen({ navigation }: any) {
         </View>
       ) : (
         <FlatList
-          data={cryptos}
+          data={cryptos.slice(0, visibleCryptoCount)}
           renderItem={renderCryptoItem}
           keyExtractor={(item) => item.symbol}
           ListHeaderComponent={
             <>
-              {/* Crypto Portfolio Chart - Show if user has crypto holdings */}
+              {/* Crypto Portfolio Chart */}
               {cryptoHoldings.length > 0 && (
                 <View style={styles.portfolioSection}>
                   <View style={styles.portfolioHeader}>
-                    <View>
-                      <Text style={styles.portfolioLabel}>Crypto Portfolio</Text>
-                      <Text style={styles.portfolioValue}>
-                        ${cryptoPortfolioValue.toLocaleString('en-US', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </Text>
-                      <Text style={[
-                        styles.portfolioProfitLoss,
-                        isPortfolioPositive ? styles.positive : styles.negative
-                      ]}>
-                        {isPortfolioPositive ? '+' : ''}${Math.abs(cryptoProfitLoss).toFixed(2)}
-                      </Text>
-                    </View>
+                    <Text style={styles.portfolioLabel}>Crypto Portfolio</Text>
+                    <Text style={styles.portfolioValue}>
+                      {formatCurrency(cryptoPortfolioValue)}
+                    </Text>
+                    <Text style={[
+                      styles.portfolioProfitLoss,
+                      isPortfolioPositive ? styles.positive : styles.negative
+                    ]}>
+                      {formatCurrency(Math.abs(cryptoProfitLoss), isPortfolioPositive)}
+                    </Text>
                   </View>
 
                   {/* Chart */}
@@ -319,50 +327,55 @@ export default function CryptoScreen({ navigation }: any) {
                   ) : (
                     <View style={styles.chartPlaceholder}>
                       <Text style={styles.chartPlaceholderText}>Chart data unavailable</Text>
+                      <Text style={styles.chartPlaceholderSubtext}>
+                        Crypto historical data is temporarily unavailable.{'\n'}
+                        This is due to API rate limits. Chart will load when data is available.
+                      </Text>
                     </View>
                   )}
                 </View>
               )}
 
-              {/* Crypto Holdings */}
+              {/* ✅ NEW: COLLAPSEABLE Crypto Holdings */}
               {cryptoHoldings.length > 0 && (
                 <View style={styles.holdingsSection}>
-                  <Text style={styles.sectionTitle}>My Crypto</Text>
-                  {cryptoHoldings.map((holding) => {
-                    const isUp = parseFloat(holding.profitLossPercent) >= 0;
+                  <TouchableOpacity 
+                    style={styles.sectionHeader}
+                    onPress={() => setHoldingsExpanded(!holdingsExpanded)}
+                  >
+                    <Text style={styles.sectionTitle}>Your Crypto ({cryptoHoldings.length})</Text>
+                    <Text style={styles.expandIcon}>{holdingsExpanded ? '▼' : '▶'}</Text>
+                  </TouchableOpacity>
+                  
+                  {holdingsExpanded && cryptoHoldings.map((holding) => {
+                    const isProfitable = parseFloat(holding.profitLossPercent) >= 0;
                     return (
                       <TouchableOpacity
                         key={holding.symbol}
                         style={styles.holdingItem}
-                        onPress={() => navigation.navigate('AssetDetail', { 
-                          symbol: holding.symbol, 
-                          name: holding.name,
-                          type: holding.type 
-                        })}
-                        activeOpacity={0.7}
+                        onPress={() => {
+                          navigation.navigate('AssetDetail', {
+                            symbol: holding.symbol,
+                            name: holding.name,
+                            type: 'crypto',
+                          });
+                        }}
                       >
-                        <View style={styles.itemLeft}>
-                          <Text style={styles.itemSymbol}>{holding.symbol}</Text>
-                          <Text style={styles.itemName} numberOfLines={1}>
-                            {holding.quantity} {holding.quantity === 1 ? 'coin' : 'coins'}
+                        <View style={styles.holdingInfo}>
+                          <Text style={styles.holdingSymbol}>{holding.symbol}</Text>
+                          <Text style={styles.holdingQuantity}>
+                            {formatCryptoQuantity(holding.quantity)} {holding.quantity === 1 ? 'coin' : 'coins'}
                           </Text>
                         </View>
-
-                        <View style={styles.itemRight}>
-                          <Text style={styles.itemPrice}>
-                            ${holding.currentValue.toLocaleString('en-US', {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                        <View style={styles.holdingValues}>
+                          <Text style={styles.holdingValue}>
+                            {formatCurrency(holding.currentValue)}
                           </Text>
-                          <Text
-                            style={[
-                              styles.itemChange,
-                              isUp ? styles.positive : styles.negative,
-                            ]}
-                          >
-                            {isUp ? '+' : ''}${Math.abs(holding.profitLoss).toFixed(2)} (
-                            {isUp ? '+' : ''}{holding.profitLossPercent}%)
+                          <Text style={[
+                            styles.holdingProfit,
+                            isProfitable ? styles.positive : styles.negative
+                          ]}>
+                            {formatCurrency(Math.abs(holding.profitLoss), isProfitable)} ({formatPercent(parseFloat(holding.profitLossPercent))})
                           </Text>
                         </View>
                       </TouchableOpacity>
@@ -371,10 +384,35 @@ export default function CryptoScreen({ navigation }: any) {
                 </View>
               )}
 
-              {/* Section Title for All Cryptos */}
+              {/* Section Title */}
               <View style={styles.listHeaderSection}>
                 <Text style={styles.sectionTitle}>All Cryptocurrencies</Text>
               </View>
+            </>
+          }
+          ListFooterComponent={
+            <>
+              {/* Load More Button */}
+              {visibleCryptoCount < cryptos.length && (
+                <TouchableOpacity
+                  style={styles.loadMoreButton}
+                  onPress={handleLoadMore}
+                >
+                  <Text style={styles.loadMoreText}>
+                    Load More ({cryptos.length - visibleCryptoCount} remaining)
+                  </Text>
+                </TouchableOpacity>
+              )}
+              
+              {/* Show Less Button */}
+              {visibleCryptoCount > 5 && (
+                <TouchableOpacity
+                  style={styles.showLessButton}
+                  onPress={() => setVisibleCryptoCount(5)}
+                >
+                  <Text style={styles.showLessText}>Show Less</Text>
+                </TouchableOpacity>
+              )}
             </>
           }
           contentContainerStyle={styles.listContent}
@@ -389,7 +427,7 @@ export default function CryptoScreen({ navigation }: any) {
       )}
     </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -448,56 +486,83 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
+    paddingHorizontal: 32,
   },
   chartPlaceholderText: {
     fontSize: 14,
     color: '#666',
+    marginBottom: 8,
+  },
+  chartPlaceholderSubtext: {
+    fontSize: 12,
+    color: '#555',
+    textAlign: 'center',
+    lineHeight: 18,
   },
   holdingsSection: {
     paddingHorizontal: 16,
     marginBottom: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingVertical: 4,
+  },
   sectionTitle: {
     fontSize: 22,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 8,
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#00C805',
+    fontWeight: 'bold',
   },
   holdingItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 16,
-    paddingHorizontal: 0,
-    backgroundColor: '#000',
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
   },
-  itemLeft: {
+  holdingInfo: {
     flex: 1,
   },
-  itemSymbol: {
+  holdingSymbol: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
     marginBottom: 4,
   },
-  itemName: {
+  holdingQuantity: {
     fontSize: 14,
     color: '#999',
   },
-  itemRight: {
+  holdingValues: {
     alignItems: 'flex-end',
   },
-  itemPrice: {
+  holdingValue: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
     marginBottom: 4,
   },
-  itemChange: {
+  holdingProfit: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  collapseButton: {
+    marginTop: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  collapseText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
   },
   listHeaderSection: {
     paddingHorizontal: 16,
@@ -525,7 +590,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
   },
-  cryptoLeft: {
+  cryptoInfo: {
     flex: 1,
   },
   cryptoSymbol: {
@@ -541,17 +606,17 @@ const styles = StyleSheet.create({
   cryptoRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
   },
   sparklineWrapper: {
     width: 60,
     height: 30,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 16,
   },
   priceInfo: {
     alignItems: 'flex-end',
-    width: 80,
+    width: 100,
   },
   cryptoPrice: {
     fontSize: 16,
@@ -563,6 +628,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  loadMoreButton: {
+    marginTop: 16,
+    marginHorizontal: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+    alignItems: 'center',
+  },
+  loadMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#00C805',
+  },
+  showLessButton: {
+    marginTop: 8,
+    marginHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  showLessText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
   positive: {
     color: '#00C805',
   },
@@ -570,3 +662,5 @@ const styles = StyleSheet.create({
     color: '#FF5000',
   },
 });
+
+export default CryptoScreen;

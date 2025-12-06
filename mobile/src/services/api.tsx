@@ -24,18 +24,28 @@ const apiClient = axios.create({
   },
 });
 
-// ... rest of your code stays the same
-
 // Request interceptor: Add access token
 apiClient.interceptors.request.use(
   async (config) => {
     const accessToken = await AsyncStorage.getItem('accessToken');
+    
+    // Debug logging
+    console.log(`📡 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+    console.log(`🔑 Access Token: ${accessToken ? 'EXISTS ✅' : 'MISSING ❌'}`);
+    
     if (accessToken) {
       config.headers.Authorization = `Bearer ${accessToken}`;
+    } else if (!config.url?.includes('/auth/')) {
+      // Only warn if not an auth endpoint
+      console.log('⚠️ No access token for authenticated request!');
+      const allKeys = await AsyncStorage.getAllKeys();
+      console.log('📦 Available storage keys:', allKeys);
     }
+    
     return config;
   },
   (error) => {
+    console.log('❌ Request interceptor error:', error);
     return Promise.reject(error);
   }
 );
@@ -47,25 +57,31 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
+      console.log('🔄 401 Error - Attempting token refresh...');
       originalRequest._retry = true;
 
       try {
         const refreshToken = await AsyncStorage.getItem('refreshToken');
         
         if (!refreshToken) {
+          console.log('❌ No refresh token found - clearing auth');
           throw new Error('No refresh token');
         }
 
+        console.log('🔄 Sending refresh token request...');
         const response = await axios.post(`${API_URL}/api/auth/refresh`, {
           refreshToken,
         });
 
         const { accessToken } = response.data;
+        
+        console.log('✅ Token refresh successful');
         await AsyncStorage.setItem('accessToken', accessToken);
 
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return apiClient(originalRequest);
       } catch (refreshError) {
+        console.log('❌ Token refresh failed - clearing auth');
         await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'user']);
         return Promise.reject(refreshError);
       }
@@ -85,28 +101,69 @@ export async function register(data: {
   firstName: string;
   lastName: string;
 }) {
+  console.log('📝 Registering user:', data.email);
+  
   const response = await apiClient.post('/api/auth/register', data);
+  
+  // ✅ CRITICAL FIX: Store tokens after registration
+  const { accessToken, refreshToken, user } = response.data;
+  
+  if (accessToken && refreshToken) {
+    console.log('✅ Registration successful - storing tokens');
+    await AsyncStorage.setItem('accessToken', accessToken);
+    await AsyncStorage.setItem('refreshToken', refreshToken);
+    await AsyncStorage.setItem('user', JSON.stringify(user));
+    console.log('✅ Tokens stored in AsyncStorage');
+  } else {
+    console.log('⚠️ No tokens in registration response!');
+  }
+  
   return response.data;
 }
 
 export async function login(data: { email: string; password: string }) {
+  console.log('🔐 Logging in user:', data.email);
+  
   const response = await apiClient.post('/api/auth/login', data);
+  
+  // ✅ CRITICAL FIX: Store tokens after login
+  const { accessToken, refreshToken, user } = response.data;
+  
+  if (accessToken && refreshToken) {
+    console.log('✅ Login successful - storing tokens');
+    await AsyncStorage.setItem('accessToken', accessToken);
+    await AsyncStorage.setItem('refreshToken', refreshToken);
+    await AsyncStorage.setItem('user', JSON.stringify(user));
+    console.log('🔑 Access token stored:', accessToken.substring(0, 20) + '...');
+    console.log('✅ All tokens stored in AsyncStorage');
+  } else {
+    console.log('⚠️ No tokens in login response!');
+  }
+  
   return response.data;
 }
 
 export async function getCurrentUser() {
+  console.log('👤 Fetching current user...');
   const response = await apiClient.get('/api/auth/me');
   return response.data;
 }
 
 export async function logout() {
+  console.log('🔓 Logging out...');
+  
   const refreshToken = await AsyncStorage.getItem('refreshToken');
   
   if (refreshToken) {
-    await apiClient.post('/api/auth/logout', { refreshToken });
+    try {
+      await apiClient.post('/api/auth/logout', { refreshToken });
+    } catch (error) {
+      console.log('Logout request failed, clearing local storage anyway');
+    }
   }
   
   await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'user']);
+  console.log('✅ Storage cleared');
 }
 
 // ============================================
@@ -129,14 +186,14 @@ export async function searchSymbols(query: string) {
 }
 
 export async function getBulkPrices(symbols: string[] | Array<{symbol: string; type: string}>) {
-    // Normalize to object format if strings are passed
-    const normalizedSymbols = symbols.map(s => 
-      typeof s === 'string' ? { symbol: s, type: 'stock' } : s
-    );
-    
-    const response = await apiClient.post('/api/prices/bulk', { symbols: normalizedSymbols });
-    return response.data;
-  }
+  // Normalize to object format if strings are passed
+  const normalizedSymbols = symbols.map(s => 
+    typeof s === 'string' ? { symbol: s, type: 'stock' } : s
+  );
+  
+  const response = await apiClient.post('/api/prices/bulk', { symbols: normalizedSymbols });
+  return response.data;
+}
 
 // ============================================
 // PORTFOLIO FUNCTIONS
@@ -210,31 +267,34 @@ export async function getSymbolTransactions(symbol: string) {
   return response.data;
 }
 
-// Historical price data for charts
+// ============================================
+// HISTORICAL DATA FUNCTIONS
+// ============================================
+
 export async function getPortfolioHistory(days: number = 30) {
-    const response = await apiClient.get(`/api/historical/portfolio?days=${days}`);
-    return response.data;
-  }
-  
-  export async function getCryptoPortfolioHistory(days: number = 30) {
-    const response = await apiClient.get(`/api/historical/crypto-portfolio?days=${days}`);
-    return response.data;
-  }
-  
-  export async function getStockHistory(symbol: string, days: number = 30) {
-    const response = await apiClient.get(`/api/historical/stock/${symbol}?days=${days}`);
-    return response.data;
-  }
-  
-  export async function getCryptoHistory(symbol: string, days: number = 30) {
-    const response = await apiClient.get(`/api/historical/crypto/${symbol}?days=${days}`);
-    return response.data;
-  }
-  
-  export async function getAssetHistory(symbol: string, type: string, days: number = 7) {
-    const endpoint = type === 'crypto' ? 'crypto' : 'stock';
-    const response = await apiClient.get(`/api/historical/${endpoint}/${symbol}?days=${days}`);
-    return response.data;
-  }  
+  const response = await apiClient.get(`/api/historical/portfolio?days=${days}`);
+  return response.data;
+}
+
+export async function getCryptoPortfolioHistory(days: number = 30) {
+  const response = await apiClient.get(`/api/historical/crypto-portfolio?days=${days}`);
+  return response.data;
+}
+
+export async function getStockHistory(symbol: string, days: number = 30) {
+  const response = await apiClient.get(`/api/historical/stock/${symbol}?days=${days}`);
+  return response.data;
+}
+
+export async function getCryptoHistory(symbol: string, days: number = 30) {
+  const response = await apiClient.get(`/api/historical/crypto/${symbol}?days=${days}`);
+  return response.data;
+}
+
+export async function getAssetHistory(symbol: string, type: string, days: number = 7) {
+  const endpoint = type === 'crypto' ? 'crypto' : 'stock';
+  const response = await apiClient.get(`/api/historical/${endpoint}/${symbol}?days=${days}`);
+  return response.data;
+}
 
 export default apiClient;

@@ -1,345 +1,431 @@
 // ============================================
-// TRADE ROUTES - Buy and sell stocks/crypto
+// TRADE ROUTES - Buy/Sell stocks and crypto (FIXED CALCULATIONS)
 // ============================================
 
 const express = require('express');
 const router = express.Router();
-const authenticate = require('../middleware/auth');
-const User = require('../models/User');
-const Portfolio = require('../models/Portfolio');
+const auth = require('../middleware/auth');
 const Transaction = require('../models/Transaction');
+const Portfolio = require('../models/Portfolio');
+const Holding = require('../models/Holding');
+const { getStockPrice, getCryptoPrice } = require('../services/priceCache');
 
 // ============================================
-// POST /api/trade/buy - Buy stocks/crypto
+// GET HOLDINGS - With correct return calculations
 // ============================================
-
-router.post('/buy', authenticate, async (req, res) => {
+router.get('/holdings', auth, async (req, res) => {
   try {
-    const { symbol, quantity, price, name, type } = req.body;
+    const holdings = await Holding.find({ userId: req.userId });
+    
+    console.log(`📊 Found ${holdings.length} holdings for user ${req.userId}`);
+    
+    // Get current prices for all holdings
+    const holdingsWithPrices = await Promise.all(
+      holdings.map(async (holding) => {
+        try {
+          let priceData;
+          
+          // Get current price based on type
+          if (holding.type === 'crypto') {
+            priceData = await getCryptoPrice(holding.symbol);
+          } else {
+            priceData = await getStockPrice(holding.symbol);
+          }
+          
+          if (!priceData || !priceData.price) {
+            console.warn(`⚠️ No price data for ${holding.symbol}`);
+            return holding.toObject();
+          }
 
-    // Validate input
-    if (!symbol || !quantity || !price) {
-      return res.status(400).json({
-        success: false,
-        error: 'Symbol, quantity, and price are required',
-      });
-    }
+          const currentPrice = priceData.price;
+          const previousClose = priceData.previousClose || currentPrice; // Use previousClose if available
+          
+          // Calculate values
+          const currentValue = holding.quantity * currentPrice;
+          const totalInvested = holding.quantity * holding.avgBuyPrice;
+          const totalReturn = currentValue - totalInvested;
+          const totalReturnPercent = totalInvested > 0 ? ((totalReturn / totalInvested) * 100) : 0;
+          
+          // Calculate today's return
+          const yesterdayValue = holding.quantity * previousClose;
+          const todaysReturn = currentValue - yesterdayValue;
+          const todaysReturnPercent = yesterdayValue > 0 ? ((todaysReturn / yesterdayValue) * 100) : 0;
 
-    if (quantity <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Quantity must be greater than 0',
-      });
-    }
+          console.log(`📈 ${holding.symbol}:`, {
+            quantity: holding.quantity,
+            avgBuyPrice: holding.avgBuyPrice,
+            currentPrice: currentPrice,
+            previousClose: previousClose,
+            currentValue: currentValue.toFixed(2),
+            totalInvested: totalInvested.toFixed(2),
+            totalReturn: totalReturn.toFixed(2),
+            totalReturnPercent: totalReturnPercent.toFixed(2) + '%',
+            todaysReturn: todaysReturn.toFixed(2),
+            todaysReturnPercent: todaysReturnPercent.toFixed(2) + '%'
+          });
 
-    const totalCost = price * quantity;
-
-    // Get user
-    const user = await User.findById(req.userId);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found',
-      });
-    }
-
-    // Check if user has enough cash
-    if (user.cashBalance < totalCost) {
-      return res.status(400).json({
-        success: false,
-        error: 'Insufficient funds',
-        required: totalCost,
-        available: user.cashBalance,
-      });
-    }
-
-    // Check if user already owns this asset
-    let holding = await Portfolio.findOne({ 
-      userId: req.userId, 
-      symbol: symbol.toUpperCase() 
-    });
-
-    if (holding) {
-      // Update existing holding using the model's method
-      await holding.addShares(quantity, price);
-    } else {
-      // Create new holding
-      holding = new Portfolio({
-        userId: req.userId,
-        symbol: symbol.toUpperCase(),
-        name: name || symbol,
-        type: type || 'stock',
-        quantity,
-        avgBuyPrice: price,
-        currentPrice: price,
-      });
-      await holding.save();
-    }
-
-    // Update user cash balance
-    user.cashBalance -= totalCost;
-    await user.save();
-
-    // Create transaction record with correct field names
-    const transaction = new Transaction({
-      userId: req.userId,
-      symbol: symbol.toUpperCase(),
-      name: name || symbol,
-      type: type || 'stock',
-      action: 'buy',  // ← Changed from 'type' to 'action'
-      quantity,
-      price,
-      totalAmount: totalCost,  // ← Changed from 'total' to 'totalAmount'
-      status: 'completed',
-    });
-    await transaction.save();
+          return {
+            ...holding.toObject(),
+            currentPrice,
+            previousClose,
+            currentValue,
+            profitLoss: totalReturn,
+            profitLossPercent: totalReturnPercent.toFixed(2),
+            todaysReturn,
+            todaysReturnPercent: todaysReturnPercent.toFixed(2),
+            totalReturn,
+            totalReturnPercent: totalReturnPercent.toFixed(2),
+          };
+        } catch (error) {
+          console.error(`❌ Error processing ${holding.symbol}:`, error.message);
+          return holding.toObject();
+        }
+      })
+    );
 
     res.json({
       success: true,
-      transaction: {
-        type: 'buy',
-        symbol: symbol.toUpperCase(),
-        quantity,
-        price,
-        total: totalCost,
-      },
-      newCashBalance: user.cashBalance,
-      holding: {
-        symbol: holding.symbol,
-        quantity: holding.quantity,
-        avgBuyPrice: holding.avgBuyPrice,
-        currentPrice: holding.currentPrice,
-      },
+      holdings: holdingsWithPrices,
     });
   } catch (error) {
-    console.error('Buy error:', error);
+    console.error('❌ Error fetching holdings:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to execute buy order',
+      message: 'Failed to fetch holdings',
+      error: error.message,
     });
   }
 });
 
 // ============================================
-// POST /api/trade/sell - Sell stocks/crypto
+// GET SINGLE HOLDING
 // ============================================
+router.get('/holding/:symbol', auth, async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    
+    const holding = await Holding.findOne({ 
+      userId: req.userId, 
+      symbol: symbol.toUpperCase() 
+    });
+    
+    if (!holding) {
+      return res.json({
+        success: true,
+        holding: null,
+      });
+    }
 
-router.post('/sell', authenticate, async (req, res) => {
+    // Get current price
+    let priceData;
+    if (holding.type === 'crypto') {
+      priceData = await getCryptoPrice(holding.symbol);
+    } else {
+      priceData = await getStockPrice(holding.symbol);
+    }
+
+    if (!priceData || !priceData.price) {
+      return res.json({
+        success: true,
+        holding: holding.toObject(),
+      });
+    }
+
+    const currentPrice = priceData.price;
+    const previousClose = priceData.previousClose || currentPrice;
+    
+    // Calculate values
+    const currentValue = holding.quantity * currentPrice;
+    const totalInvested = holding.quantity * holding.avgBuyPrice;
+    const totalReturn = currentValue - totalInvested;
+    const totalReturnPercent = totalInvested > 0 ? ((totalReturn / totalInvested) * 100) : 0;
+    
+    // Calculate today's return
+    const yesterdayValue = holding.quantity * previousClose;
+    const todaysReturn = currentValue - yesterdayValue;
+    const todaysReturnPercent = yesterdayValue > 0 ? ((todaysReturn / yesterdayValue) * 100) : 0;
+
+    res.json({
+      success: true,
+      holding: {
+        ...holding.toObject(),
+        currentPrice,
+        previousClose,
+        currentValue,
+        profitLoss: totalReturn,
+        profitLossPercent: totalReturnPercent.toFixed(2),
+        todaysReturn,
+        todaysReturnPercent: todaysReturnPercent.toFixed(2),
+        totalReturn,
+        totalReturnPercent: totalReturnPercent.toFixed(2),
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error fetching holding:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch holding',
+      error: error.message,
+    });
+  }
+});
+
+// ============================================
+// BUY ASSET
+// ============================================
+router.post('/buy', auth, async (req, res) => {
+  try {
+    const { symbol, quantity, price, name, type } = req.body;
+
+    // Validate inputs
+    if (!symbol || !quantity || !price || !name || !type) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields',
+      });
+    }
+
+    if (quantity <= 0 || price <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity and price must be positive',
+      });
+    }
+
+    const totalCost = quantity * price;
+
+    // Get user's portfolio
+    let portfolio = await Portfolio.findOne({ userId: req.userId });
+    if (!portfolio) {
+      portfolio = new Portfolio({ userId: req.userId });
+    }
+
+    // Check if user has enough cash
+    if (portfolio.cashBalance < totalCost) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient funds',
+      });
+    }
+
+    // Update or create holding
+    let holding = await Holding.findOne({
+      userId: req.userId,
+      symbol: symbol.toUpperCase(),
+    });
+
+    if (holding) {
+      // Update existing holding with weighted average
+      const totalQuantity = holding.quantity + quantity;
+      const totalValue = (holding.quantity * holding.avgBuyPrice) + (quantity * price);
+      holding.avgBuyPrice = totalValue / totalQuantity;
+      holding.quantity = totalQuantity;
+      holding.currentPrice = price;
+      holding.currentValue = totalQuantity * price;
+      holding.profitLoss = holding.currentValue - (totalQuantity * holding.avgBuyPrice);
+      holding.profitLossPercent = (((holding.currentValue / (totalQuantity * holding.avgBuyPrice)) - 1) * 100).toFixed(2);
+    } else {
+      // Create new holding
+      holding = new Holding({
+        userId: req.userId,
+        symbol: symbol.toUpperCase(),
+        name,
+        type,
+        quantity,
+        avgBuyPrice: price,
+        currentPrice: price,
+        currentValue: totalCost,
+        profitLoss: 0,
+        profitLossPercent: '0.00',
+      });
+    }
+
+    await holding.save();
+
+    // Create transaction
+    const transaction = new Transaction({
+      userId: req.userId,
+      symbol: symbol.toUpperCase(),
+      name,
+      type,
+      action: 'buy',
+      quantity,
+      price,
+      total: totalCost,
+    });
+
+    await transaction.save();
+
+    // Update portfolio cash balance
+    portfolio.cashBalance -= totalCost;
+    await portfolio.save();
+
+    console.log(`✅ Buy successful: ${quantity} ${symbol} @ $${price}`);
+
+    res.json({
+      success: true,
+      message: 'Purchase successful',
+      holding: holding.toObject(),
+      transaction: transaction.toObject(),
+      newBalance: portfolio.cashBalance,
+    });
+  } catch (error) {
+    console.error('❌ Error buying asset:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to buy asset',
+      error: error.message,
+    });
+  }
+});
+
+// ============================================
+// SELL ASSET
+// ============================================
+router.post('/sell', auth, async (req, res) => {
   try {
     const { symbol, quantity, price } = req.body;
 
-    // Validate input
+    // Validate inputs
     if (!symbol || !quantity || !price) {
       return res.status(400).json({
         success: false,
-        error: 'Symbol, quantity, and price are required',
+        message: 'Missing required fields',
       });
     }
 
-    if (quantity <= 0) {
+    if (quantity <= 0 || price <= 0) {
       return res.status(400).json({
         success: false,
-        error: 'Quantity must be greater than 0',
+        message: 'Quantity and price must be positive',
       });
     }
 
-    const totalValue = price * quantity;
-
-    // Get user
-    const user = await User.findById(req.userId);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found',
-      });
-    }
-
-    // Find holding
-    const holding = await Portfolio.findOne({ 
-      userId: req.userId, 
-      symbol: symbol.toUpperCase() 
+    // Get holding
+    const holding = await Holding.findOne({
+      userId: req.userId,
+      symbol: symbol.toUpperCase(),
     });
 
     if (!holding) {
       return res.status(400).json({
         success: false,
-        error: `You don't own any ${symbol}`,
+        message: `You don't own any ${symbol}`,
       });
     }
 
+    // Check if user has enough shares
     if (holding.quantity < quantity) {
       return res.status(400).json({
         success: false,
-        error: `Insufficient shares. You own ${holding.quantity} shares`,
-        owned: holding.quantity,
-        requested: quantity,
+        message: `Insufficient ${symbol}. You own ${holding.quantity} but tried to sell ${quantity}`,
       });
     }
 
-    // Store holding details before potentially deleting it
-    const holdingName = holding.name;
-    const holdingType = holding.type;
+    const totalValue = quantity * price;
 
-    // Remove shares (this will delete the holding if quantity reaches 0)
-    await holding.removeShares(quantity);
+    // Update or delete holding
+    if (holding.quantity === quantity) {
+      // Selling all shares - delete holding
+      await Holding.deleteOne({ _id: holding._id });
+      console.log(`🗑️ Deleted holding: sold all ${quantity} ${symbol}`);
+    } else {
+      // Selling partial shares - update holding
+      holding.quantity -= quantity;
+      holding.currentPrice = price;
+      holding.currentValue = holding.quantity * price;
+      holding.profitLoss = holding.currentValue - (holding.quantity * holding.avgBuyPrice);
+      holding.profitLossPercent = (((holding.currentValue / (holding.quantity * holding.avgBuyPrice)) - 1) * 100).toFixed(2);
+      await holding.save();
+      console.log(`📉 Updated holding: sold ${quantity} ${symbol}, ${holding.quantity} remaining`);
+    }
 
-    // Update user cash balance
-    user.cashBalance += totalValue;
-    await user.save();
-
-    // Create transaction record with correct field names
+    // Create transaction
     const transaction = new Transaction({
       userId: req.userId,
       symbol: symbol.toUpperCase(),
-      name: holdingName,
-      type: holdingType,
-      action: 'sell',  // ← Changed from 'type' to 'action'
+      name: holding.name,
+      type: holding.type,
+      action: 'sell',
       quantity,
       price,
-      totalAmount: totalValue,  // ← Changed from 'total' to 'totalAmount'
-      status: 'completed',
+      total: totalValue,
     });
+
     await transaction.save();
 
+    // Update portfolio cash balance
+    let portfolio = await Portfolio.findOne({ userId: req.userId });
+    if (!portfolio) {
+      portfolio = new Portfolio({ userId: req.userId });
+    }
+    portfolio.cashBalance += totalValue;
+    await portfolio.save();
+
+    console.log(`✅ Sell successful: ${quantity} ${symbol} @ $${price}`);
+
     res.json({
       success: true,
-      transaction: {
-        type: 'sell',
-        symbol: symbol.toUpperCase(),
-        quantity,
-        price,
-        total: totalValue,
-      },
-      newCashBalance: user.cashBalance,
-      remainingShares: holding.quantity > 0 ? holding.quantity : 0,
+      message: 'Sale successful',
+      holding: holding.quantity > 0 ? holding.toObject() : null,
+      transaction: transaction.toObject(),
+      newBalance: portfolio.cashBalance,
     });
   } catch (error) {
-    console.error('Sell error:', error);
+    console.error('❌ Error selling asset:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to execute sell order',
+      message: 'Failed to sell asset',
+      error: error.message,
     });
   }
 });
 
 // ============================================
-// GET /api/trade/holdings - Get user holdings
+// GET TRANSACTIONS
 // ============================================
-
-router.get('/holdings', authenticate, async (req, res) => {
+router.get('/transactions', auth, async (req, res) => {
   try {
-    const holdings = await Portfolio.getUserPortfolio(req.userId);
-
-    res.json({
-      success: true,
-      holdings: holdings.map(h => ({
-        symbol: h.symbol,
-        name: h.name,
-        type: h.type,
-        quantity: h.quantity,
-        avgBuyPrice: h.avgBuyPrice,
-        currentPrice: h.currentPrice,
-        currentValue: h.currentValue,
-        profitLoss: h.profitLoss,
-        profitLossPercent: h.profitLossPercent,
-      })),
-    });
-  } catch (error) {
-    console.error('Get holdings error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get holdings',
-    });
-  }
-});
-
-// ============================================
-// GET /api/trade/holding/:symbol - Get specific holding
-// ============================================
-
-router.get('/holding/:symbol', authenticate, async (req, res) => {
-    try {
-      const { symbol } = req.params;
-      
-      const holding = await Portfolio.findOne({ 
-        userId: req.userId, 
-        symbol: symbol.toUpperCase() 
-      });
-  
-      if (!holding) {
-        return res.json({
-          success: true,
-          holding: null,
-        });
-      }
-  
-      res.json({
-        success: true,
-        holding: {
-          symbol: holding.symbol,
-          name: holding.name,
-          type: holding.type,
-          quantity: holding.quantity,
-          avgBuyPrice: holding.avgBuyPrice,
-          currentPrice: holding.currentPrice,
-          totalCost: holding.totalCost,
-          currentValue: holding.currentValue,
-          profitLoss: holding.profitLoss,
-          profitLossPercent: holding.profitLossPercent,
-        },
-      });
-    } catch (error) {
-      console.error('Get holding error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get holding',
-      });
-    }
-  });
-  
-  // ============================================
-  // GET /api/trade/transactions/:symbol - Get transactions for symbol
-  // ============================================
-  
-  router.get('/transactions/:symbol', authenticate, async (req, res) => {
-    try {
-      const { symbol } = req.params;
-      
-      const transactions = await Transaction.getSymbolTransactions(
-        req.userId, 
-        symbol.toUpperCase()
-      );
-  
-      res.json({
-        success: true,
-        transactions,
-      });
-    } catch (error) {
-      console.error('Get symbol transactions error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get transactions',
-      });
-    }
-  });
-
-// ============================================
-// GET /api/trade/transactions - Get transaction history
-// ============================================
-
-router.get('/transactions', authenticate, async (req, res) => {
-  try {
-    const transactions = await Transaction.getUserTransactions(req.userId, 50);
+    const transactions = await Transaction.find({ userId: req.userId })
+      .sort({ createdAt: -1 })
+      .limit(100);
 
     res.json({
       success: true,
       transactions,
     });
   } catch (error) {
-    console.error('Get transactions error:', error);
+    console.error('❌ Error fetching transactions:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get transactions',
+      message: 'Failed to fetch transactions',
+      error: error.message,
+    });
+  }
+});
+
+// ============================================
+// GET TRANSACTIONS FOR SPECIFIC SYMBOL
+// ============================================
+router.get('/transactions/:symbol', auth, async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    
+    const transactions = await Transaction.find({
+      userId: req.userId,
+      symbol: symbol.toUpperCase(),
+    }).sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      transactions,
+    });
+  } catch (error) {
+    console.error('❌ Error fetching transactions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch transactions',
+      error: error.message,
     });
   }
 });

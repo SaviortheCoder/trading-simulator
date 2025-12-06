@@ -1,12 +1,13 @@
 // ============================================
-// APP NAVIGATOR - Handle navigation & auth flow
+// APP NAVIGATOR - FIXED TAB ORDER
+// Home, Crypto, Search, Settings
 // ============================================
 
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, View, Text, Platform } from 'react-native';
+import { ActivityIndicator, View, Platform } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 
 // Screens
@@ -53,27 +54,6 @@ const HomeIcon = ({ color }: { color: string }) => (
   </View>
 );
 
-const SearchIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
-    <View style={{ 
-      width: 14, 
-      height: 14, 
-      borderRadius: 7, 
-      borderWidth: 2, 
-      borderColor: color,
-    }} />
-    <View style={{ 
-      position: 'absolute',
-      width: 6, 
-      height: 2, 
-      backgroundColor: color,
-      bottom: 4,
-      right: 4,
-      transform: [{ rotate: '45deg' }]
-    }} />
-  </View>
-);
-
 const CryptoIcon = ({ color }: { color: string }) => (
   <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
     <View style={{ 
@@ -100,6 +80,27 @@ const CryptoIcon = ({ color }: { color: string }) => (
       height: 20,
       backgroundColor: color,
       left: 9,
+    }} />
+  </View>
+);
+
+const SearchIcon = ({ color }: { color: string }) => (
+  <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
+    <View style={{ 
+      width: 14, 
+      height: 14, 
+      borderRadius: 7, 
+      borderWidth: 2, 
+      borderColor: color,
+    }} />
+    <View style={{ 
+      position: 'absolute',
+      width: 6, 
+      height: 2, 
+      backgroundColor: color,
+      bottom: 4,
+      right: 4,
+      transform: [{ rotate: '45deg' }]
     }} />
   </View>
 );
@@ -139,89 +140,88 @@ const SettingsIcon = ({ color }: { color: string }) => (
   </View>
 );
 
-// ✅ ADD THIS LINE - YOU WERE MISSING IT!
 const HomeStack = createNativeStackNavigator();
 
 function HomeStackScreen() {
-    return (
-      <HomeStack.Navigator screenOptions={{ headerShown: false }}>
-        <HomeStack.Screen name="Dashboard" component={DashboardScreen} />
-        <HomeStack.Screen name="AssetDetail" component={AssetDetailScreen} />
-        <HomeStack.Screen 
-          name="SimplifiedTrade" 
-          component={TradeConfirmationScreen}
-          options={{ 
-            presentation: 'modal',
-            animation: 'slide_from_bottom'
-          }}
-        />
-        <HomeStack.Screen 
-          name="OrderConfirmation" 
-          component={OrderConfirmationScreen}
-          options={{ 
-            presentation: 'modal',
-            animation: 'slide_from_bottom'
-          }}
-        />
-      </HomeStack.Navigator>
-    );
-  }
-
-const SearchStack = createNativeStackNavigator();
-
-function SearchStackScreen() {
-    return (
-      <SearchStack.Navigator screenOptions={{ headerShown: false }}>
-        <SearchStack.Screen name="SearchMain" component={SearchScreen} />
-        <SearchStack.Screen name="AssetDetail" component={AssetDetailScreen} />
-        <HomeStack.Screen 
-          name="SimplifiedTrade" 
-          component={TradeConfirmationScreen}
-          options={{ 
-            presentation: 'modal',
-            animation: 'slide_from_bottom'
-          }}
-        />
-        <HomeStack.Screen 
-          name="OrderConfirmation" 
-          component={OrderConfirmationScreen}
-          options={{ 
-            presentation: 'modal',
-            animation: 'slide_from_bottom'
-          }}
-        />
-      </SearchStack.Navigator>
-    );
-  }
+  return (
+    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+      <HomeStack.Screen name="Dashboard" component={DashboardScreen} />
+      <HomeStack.Screen name="AssetDetail" component={AssetDetailScreen} />
+      <HomeStack.Screen 
+        name="SimplifiedTrade" 
+        component={TradeConfirmationScreen}
+        options={{ 
+          presentation: 'modal',
+          animation: 'slide_from_bottom'
+        }}
+      />
+      <HomeStack.Screen 
+        name="OrderConfirmation" 
+        component={OrderConfirmationScreen}
+        options={{ 
+          presentation: 'modal',
+          animation: 'slide_from_bottom'
+        }}
+      />
+    </HomeStack.Navigator>
+  );
+}
 
 const CryptoStack = createNativeStackNavigator();
 
 function CryptoStackScreen() {
-    return (
-      <CryptoStack.Navigator screenOptions={{ headerShown: false }}>
-        <CryptoStack.Screen name="CryptoMain" component={CryptoScreen} />
-        <CryptoStack.Screen name="AssetDetail" component={AssetDetailScreen} />
-        <HomeStack.Screen 
-          name="SimplifiedTrade" 
-          component={TradeConfirmationScreen}
-          options={{ 
-            presentation: 'modal',
-            animation: 'slide_from_bottom'
-          }}
-        />
-        <HomeStack.Screen 
-          name="OrderConfirmation" 
-          component={OrderConfirmationScreen}
-          options={{ 
-            presentation: 'modal',
-            animation: 'slide_from_bottom'
-          }}
-        />
-      </CryptoStack.Navigator>
-    );
-  }
+  return (
+    <CryptoStack.Navigator screenOptions={{ headerShown: false }}>
+      <CryptoStack.Screen name="CryptoMain" component={CryptoScreen} />
+      <CryptoStack.Screen name="AssetDetail" component={AssetDetailScreen} />
+      <CryptoStack.Screen 
+        name="SimplifiedTrade" 
+        component={TradeConfirmationScreen}
+        options={{ 
+          presentation: 'modal',
+          animation: 'slide_from_bottom'
+        }}
+      />
+      <CryptoStack.Screen 
+        name="OrderConfirmation" 
+        component={OrderConfirmationScreen}
+        options={{ 
+          presentation: 'modal',
+          animation: 'slide_from_bottom'
+        }}
+      />
+    </CryptoStack.Navigator>
+  );
+}
 
-// Bottom Tab Navigator
+const SearchStack = createNativeStackNavigator();
+
+function SearchStackScreen() {
+  return (
+    <SearchStack.Navigator screenOptions={{ headerShown: false }}>
+      <SearchStack.Screen name="SearchMain" component={SearchScreen} />
+      <SearchStack.Screen name="AssetDetail" component={AssetDetailScreen} />
+      <SearchStack.Screen 
+        name="SimplifiedTrade" 
+        component={TradeConfirmationScreen}
+        options={{ 
+          presentation: 'modal',
+          animation: 'slide_from_bottom'
+        }}
+      />
+      <SearchStack.Screen 
+        name="OrderConfirmation" 
+        component={OrderConfirmationScreen}
+        options={{ 
+          presentation: 'modal',
+          animation: 'slide_from_bottom'
+        }}
+      />
+    </SearchStack.Navigator>
+  );
+}
+
+// ✅ FIXED TAB ORDER: Home, Crypto, Search, Settings
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -257,19 +257,19 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
-        name="Search"
-        component={SearchStackScreen}
-        options={{
-          tabBarIcon: SearchIcon,
-          tabBarLabel: 'Search',
-        }}
-      />
-      <Tab.Screen
         name="Crypto"
         component={CryptoStackScreen}
         options={{
           tabBarIcon: CryptoIcon,
           tabBarLabel: 'Crypto',
+        }}
+      />
+      <Tab.Screen
+        name="Search"
+        component={SearchStackScreen}
+        options={{
+          tabBarIcon: SearchIcon,
+          tabBarLabel: 'Search',
         }}
       />
       <Tab.Screen

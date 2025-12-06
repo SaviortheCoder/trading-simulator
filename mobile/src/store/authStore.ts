@@ -1,6 +1,7 @@
 // ============================================
-// AUTH STORE - Global authentication state
+// AUTH STORE - FIXED TOKEN STORAGE
 // ============================================
+
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -23,7 +24,7 @@ interface AuthState {
   isAuthenticated: boolean;
   
   setAuth: (user: User, accessToken: string, refreshToken: string) => Promise<void>;
-  setUser: (user: User) => Promise<void>;  // ← ADDED THIS
+  setUser: (user: User) => Promise<void>;
   clearAuth: () => Promise<void>;
   updateUser: (user: Partial<User>) => Promise<void>;
   loadFromStorage: () => Promise<void>;
@@ -36,9 +37,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
 
   setAuth: async (user, accessToken, refreshToken) => {
+    console.log('✅ Storing auth tokens...');
+    
+    // Store with CORRECT keys that match api.ts
     await AsyncStorage.setItem('user', JSON.stringify(user));
     await AsyncStorage.setItem('accessToken', accessToken);
     await AsyncStorage.setItem('refreshToken', refreshToken);
+    
+    console.log('✅ Tokens stored successfully');
+    
     set({
       user,
       accessToken,
@@ -47,20 +54,25 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
 
-  // ← ADDED THIS FUNCTION
   setUser: async (user) => {
     await AsyncStorage.setItem('user', JSON.stringify(user));
     set({ user });
   },
 
   clearAuth: async () => {
-    await AsyncStorage.multiRemove(['user', 'accessToken', 'refreshToken']);
+    console.log('🔓 Clearing auth...');
+    
+    // Clear everything
+    await AsyncStorage.clear();
+    
     set({
       user: null,
       accessToken: null,
       refreshToken: null,
       isAuthenticated: false,
     });
+    
+    console.log('✅ Auth cleared');
   },
 
   updateUser: async (updatedUser) => {
@@ -74,21 +86,31 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   loadFromStorage: async () => {
     try {
+      console.log('📦 Loading auth from storage...');
+      
       const userStr = await AsyncStorage.getItem('user');
       const accessToken = await AsyncStorage.getItem('accessToken');
       const refreshToken = await AsyncStorage.getItem('refreshToken');
       
       if (userStr && accessToken && refreshToken) {
         const user = JSON.parse(userStr);
+        
+        console.log('✅ Auth loaded from storage');
+        console.log('👤 User:', user.email);
+        console.log('🔑 Has access token:', accessToken ? 'YES' : 'NO');
+        console.log('🔑 Has refresh token:', refreshToken ? 'YES' : 'NO');
+        
         set({
           user,
           accessToken,
           refreshToken,
           isAuthenticated: true,
         });
+      } else {
+        console.log('⚠️ No stored auth found');
       }
     } catch (error) {
-      console.error('Failed to load auth from storage:', error);
+      console.error('❌ Failed to load auth from storage:', error);
     }
   },
 }));

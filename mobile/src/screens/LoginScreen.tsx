@@ -1,8 +1,8 @@
 // ============================================
-// LOGIN SCREEN - Robinhood-style mobile
+// LOGIN SCREEN - WITH TOKEN CLEARING & VERIFICATION
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,9 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/authStore';
 import { login } from '../services/api';
 
@@ -25,6 +27,17 @@ export default function LoginScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // ✅ CRITICAL: Clear any corrupted tokens on mount
+  useEffect(() => {
+    const clearOldTokens = async () => {
+      console.log('🧹 Clearing any existing storage on LoginScreen mount...');
+      await AsyncStorage.clear();
+      console.log('✅ Storage cleared - fresh start');
+    };
+    
+    clearOldTokens();
+  }, []);
+
   const handleLogin = async () => {
     if (!email || !password) {
       setError('Please enter email and password');
@@ -35,12 +48,50 @@ export default function LoginScreen({ navigation }: any) {
     setLoading(true);
 
     try {
+      console.log('🔐 Starting login process...');
+      console.log('📧 Email:', email);
+      
+      // Step 1: Clear storage before login
+      console.log('🧹 Clearing storage before login...');
+      await AsyncStorage.clear();
+      
+      // Step 2: Login (api.ts will store tokens)
+      console.log('📡 Calling login API...');
       const response = await login({ email, password });
+      
+      console.log('✅ Login API response received');
+      console.log('👤 User:', response.user.email);
+      
+      // Step 3: Verify tokens were stored by api.ts
+      const storedAccessToken = await AsyncStorage.getItem('accessToken');
+      const storedRefreshToken = await AsyncStorage.getItem('refreshToken');
+      
+      console.log('🔍 Verifying stored tokens...');
+      console.log('Access token stored:', storedAccessToken ? 'YES ✅' : 'NO ❌');
+      console.log('Refresh token stored:', storedRefreshToken ? 'YES ✅' : 'NO ❌');
+      
+      if (!storedAccessToken || !storedRefreshToken) {
+        console.log('❌ CRITICAL: Tokens were not stored by api.ts!');
+        throw new Error('Token storage failed. Please check api.ts');
+      }
+      
+      console.log('🔑 Access token preview:', storedAccessToken.substring(0, 50) + '...');
+      console.log('📏 Access token length:', storedAccessToken.length);
+      
+      // Step 4: Update auth store (tokens already stored by api.ts)
+      console.log('💾 Updating auth store...');
       await setAuth(response.user, response.accessToken, response.refreshToken);
-      // Navigation will happen automatically via navigation setup
+      
+      console.log('✅ Login complete - auth store updated');
+      
+      // Navigation happens automatically via navigation setup
     } catch (err: any) {
-      console.error('Login error:', err);
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+      console.error('❌ Login error:', err);
+      
+      // Clear storage on error
+      await AsyncStorage.clear();
+      
+      setError(err.response?.data?.error || err.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -129,6 +180,25 @@ export default function LoginScreen({ navigation }: any) {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Debug Button (OPTIONAL - Remove in production) */}
+        <TouchableOpacity
+          style={styles.debugButton}
+          onPress={async () => {
+            const allKeys = await AsyncStorage.getAllKeys();
+            const allData = await AsyncStorage.multiGet(allKeys);
+            
+            console.log('📦 ALL STORAGE KEYS:', allKeys);
+            console.log('📦 ALL STORAGE DATA:', allData);
+            
+            Alert.alert(
+              'Storage Debug',
+              `Keys: ${allKeys.length}\n${allKeys.join('\n')}`
+            );
+          }}
+        >
+          <Text style={styles.debugText}>🔍 Debug Storage</Text>
+        </TouchableOpacity>
 
         {/* Footer */}
         <View style={styles.footer}>
@@ -250,6 +320,19 @@ const styles = StyleSheet.create({
     color: '#00C805',
     fontSize: 14,
     fontWeight: '600',
+  },
+  debugButton: {
+    marginTop: 20,
+    padding: 12,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  debugText: {
+    color: '#666',
+    fontSize: 12,
   },
   footer: {
     marginTop: 32,

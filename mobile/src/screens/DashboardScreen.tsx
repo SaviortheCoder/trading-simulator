@@ -1,5 +1,5 @@
 // ============================================
-// DASHBOARD SCREEN - COMPLETE FIXED VERSION
+// DASHBOARD SCREEN - WITH TOKEN DEBUGGING
 // ============================================
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -13,7 +13,9 @@ import {
     ActivityIndicator,
     RefreshControl,
     Dimensions,
+    Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore';
@@ -64,7 +66,37 @@ export default function DashboardScreen({ navigation }: any) {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [visibleWatchlistCount, setVisibleWatchlistCount] = useState(5);
+    const [jwtErrorCount, setJwtErrorCount] = useState(0);
     const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
+
+    // ✅ Debug tokens on mount
+    useEffect(() => {
+        const debugTokens = async () => {
+            console.log('🔍 DashboardScreen - Checking tokens...');
+            
+            const allKeys = await AsyncStorage.getAllKeys();
+            console.log('📦 Storage keys:', allKeys);
+            
+            const accessToken = await AsyncStorage.getItem('accessToken');
+            const refreshToken = await AsyncStorage.getItem('refreshToken');
+            const userStr = await AsyncStorage.getItem('user');
+            
+            console.log('🔑 Access token:', accessToken ? 'EXISTS ✅' : 'MISSING ❌');
+            console.log('🔑 Refresh token:', refreshToken ? 'EXISTS ✅' : 'MISSING ❌');
+            console.log('👤 User data:', userStr ? 'EXISTS ✅' : 'MISSING ❌');
+            
+            if (accessToken) {
+                console.log('📏 Access token length:', accessToken.length);
+                console.log('🔑 Access token preview:', accessToken.substring(0, 50) + '...');
+            }
+            
+            if (!accessToken || !refreshToken) {
+                console.log('⚠️ MISSING TOKENS - Login might fail!');
+            }
+        };
+        
+        debugTokens();
+    }, []);
 
     useFocusEffect(
         useCallback(() => {
@@ -74,35 +106,76 @@ export default function DashboardScreen({ navigation }: any) {
 
     const loadDashboard = async (days: number = 30) => {
         setLoading(true);
+        console.log('📊 Loading dashboard...');
+        
         try {
             // Load holdings first
             try {
+                console.log('📊 Fetching holdings...');
                 const holdingsResponse = await getHoldings();
+                
                 if (holdingsResponse.success) {
                     const holdingsData = holdingsResponse.holdings || [];
+                    console.log(`✅ Loaded ${holdingsData.length} holdings`);
                     setHoldings(holdingsData);
+
+                    // Reset JWT error count on success
+                    setJwtErrorCount(0);
 
                     // Load current prices for holdings to get today's change%
                     if (holdingsData.length > 0) {
                         await loadHoldingsPrices(holdingsData);
                     }
                 }
-            } catch (error) {
-                console.error('Error loading holdings:', error);
+            } catch (error: any) {
+                console.error('❌ Error loading holdings:', error);
+                
+                // Check if it's a JWT error
+                if (error.message?.includes('Invalid token') || 
+                    error.message?.includes('jwt') ||
+                    error.response?.data?.error?.includes('token')) {
+                    
+                    console.log('⚠️ JWT ERROR DETECTED!');
+                    const newCount = jwtErrorCount + 1;
+                    setJwtErrorCount(newCount);
+                    
+                    // After 3 JWT errors, auto-clear and logout
+                    if (newCount >= 3) {
+                        console.log('🚨 Too many JWT errors - clearing storage and logging out');
+                        Alert.alert(
+                            'Session Expired',
+                            'Your session has expired. Please login again.',
+                            [
+                                {
+                                    text: 'OK',
+                                    onPress: async () => {
+                                        await AsyncStorage.clear();
+                                        await clearAuth();
+                                    }
+                                }
+                            ]
+                        );
+                    }
+                }
             }
 
             // Load portfolio history
             try {
+                console.log('📈 Fetching portfolio history...');
                 const historyResponse = await getPortfolioHistory(days);
+                
                 if (historyResponse.success) {
+                    console.log(`✅ Loaded ${historyResponse.history?.length || 0} history points`);
                     setPortfolioHistory(historyResponse.history || []);
+                    setJwtErrorCount(0);
                 }
-            } catch (error) {
-                console.error('Error loading portfolio history:', error);
+            } catch (error: any) {
+                console.error('❌ Error loading portfolio history:', error);
             }
 
             // Load watchlist from backend
             try {
+                console.log('⭐ Fetching watchlist...');
                 const watchlistResponse = await getWatchlist();
 
                 if (watchlistResponse.success && watchlistResponse.watchlist) {
@@ -112,18 +185,21 @@ export default function DashboardScreen({ navigation }: any) {
                             ...item,
                             loading: true,
                         }));
+                    
+                    console.log(`✅ Loaded ${items.length} watchlist items`);
                     setWatchlist(items);
+                    setJwtErrorCount(0);
 
                     if (items.length > 0) {
                         await loadPricesAllAtOnce(items);
                         await loadSparklines(items);
                     }
                 }
-            } catch (error) {
-                console.error('Error loading watchlist:', error);
+            } catch (error: any) {
+                console.error('❌ Error loading watchlist:', error);
             }
-        } catch (error) {
-            console.error('Error loading dashboard:', error);
+        } catch (error: any) {
+            console.error('❌ Error loading dashboard:', error);
         } finally {
             setLoading(false);
         }
@@ -245,12 +321,14 @@ export default function DashboardScreen({ navigation }: any) {
 
     const handleRefresh = async () => {
         setRefreshing(true);
+        console.log('🔄 Refreshing dashboard...');
         await loadDashboard();
         setRefreshing(false);
     };
 
     const handleLogout = async () => {
         try {
+            console.log('🔓 Logging out...');
             await logout();
             await clearAuth();
         } catch (error) {

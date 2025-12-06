@@ -1,5 +1,6 @@
 // ============================================
-// ASSET DETAIL SCREEN - WITH BUY/SELL BUTTONS
+// ASSET DETAIL SCREEN - COMPLETE FIX
+// Portfolio diversity, today's return, comma formatting
 // ============================================
 
 import React, { useEffect, useState } from 'react';
@@ -21,7 +22,8 @@ import {
   getStockHistory,
   getCryptoHistory,
   getHolding,
-  getSymbolTransactions
+  getSymbolTransactions,
+  getHoldings  // ✅ ADDED - needed for total portfolio calculation
 } from '../services/api';
 import PortfolioChart from '../components/PortfolioChart';
 import { Timeframe } from '../components/TimeframeSelector';
@@ -44,12 +46,36 @@ export default function AssetDetailScreen({ route, navigation }: any) {
   const [holding, setHolding] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalPortfolioValue, setTotalPortfolioValue] = useState(100000);  // ✅ ADDED
 
   useEffect(() => {
     loadAssetData();
     loadHoldingData();
     loadTransactionHistory();
+    loadTotalPortfolioValue();  // ✅ ADDED
   }, []);
+
+  // ✅ NEW FUNCTION - Calculate total portfolio value (cash + all holdings)
+  const loadTotalPortfolioValue = async () => {
+    try {
+      const response = await getHoldings();
+      if (response.success && response.holdings) {
+        // Sum up all holdings values
+        const holdingsValue = response.holdings.reduce(
+          (sum: number, h: any) => sum + (h.currentValue || 0), 
+          0
+        );
+        // Total = holdings + cash
+        const totalValue = (user?.cashBalance || 0) + holdingsValue;
+        setTotalPortfolioValue(totalValue);
+        console.log(`💰 Total Portfolio Value: $${totalValue.toFixed(2)} (Holdings: $${holdingsValue.toFixed(2)} + Cash: $${user?.cashBalance || 0})`);
+      }
+    } catch (error) {
+      console.error('Error loading total portfolio value:', error);
+      // Fallback to cash balance only
+      setTotalPortfolioValue(user?.cashBalance || 100000);
+    }
+  };
 
   const loadAssetData = async (days: number = 30) => {
     setLoading(true);
@@ -133,8 +159,7 @@ export default function AssetDetailScreen({ route, navigation }: any) {
     }
   };
 
- // ✅ Handle Buy button - Go to simplified dollar entry screen
-const handleBuy = () => {
+  const handleBuy = () => {
     navigation.navigate('SimplifiedTrade', {
       symbol,
       name: name || symbol,
@@ -145,7 +170,6 @@ const handleBuy = () => {
     });
   };
   
-  // ✅ Handle Sell button - Go to simplified dollar entry screen
   const handleSell = () => {
     if (!holding || holding.quantity <= 0) {
       Alert.alert('Cannot Sell', `You don't own any ${symbol}`);
@@ -194,8 +218,11 @@ const handleBuy = () => {
   }
 
   const isPositive = (assetData.changePercent || 0) >= 0;
-  const totalPortfolioValue = (user?.cashBalance || 100000);
-  const portfolioDiversity = holding ? ((holding.currentValue / totalPortfolioValue) * 100) : 0;
+  
+  // ✅ FIXED: Portfolio diversity using TOTAL portfolio value (cash + holdings)
+  const portfolioDiversity = holding && totalPortfolioValue > 0
+    ? ((holding.currentValue / totalPortfolioValue) * 100) 
+    : 0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -267,7 +294,12 @@ const handleBuy = () => {
               <View style={styles.positionRow}>
                 <View style={styles.positionItem}>
                   <Text style={styles.positionLabel}>Avg cost</Text>
-                  <Text style={styles.positionValue}>${holding.avgBuyPrice.toFixed(2)}</Text>
+                  <Text style={styles.positionValue}>
+                    ${holding.avgBuyPrice.toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </Text>
                 </View>
                 <View style={styles.positionItem}>
                   <Text style={styles.positionLabel}>Portfolio diversity</Text>
@@ -275,11 +307,19 @@ const handleBuy = () => {
                 </View>
               </View>
 
+              {/* ✅ FIXED: Use holding.todaysReturn from backend instead of calculating */}
               <View style={styles.positionRowFull}>
                 <View style={styles.positionItem}>
                   <Text style={styles.positionLabel}>Today's return</Text>
-                  <Text style={[styles.positionValue, isPositive ? styles.positive : styles.negative]}>
-                    {isPositive ? '+' : ''}${Math.abs(assetData.change * holding.quantity).toFixed(2)} ({isPositive ? '+' : ''}{assetData.changePercent.toFixed(2)}%)
+                  <Text style={[
+                    styles.positionValue, 
+                    (holding.todaysReturn || 0) >= 0 ? styles.positive : styles.negative
+                  ]}>
+                    {(holding.todaysReturn || 0) >= 0 ? '+' : ''}
+                    ${Math.abs(holding.todaysReturn || 0).toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })} ({(holding.todaysReturn || 0) >= 0 ? '+' : ''}{(holding.todaysReturnPercent || 0)}%)
                   </Text>
                 </View>
               </View>
@@ -291,7 +331,11 @@ const handleBuy = () => {
                     styles.positionValue,
                     parseFloat(holding.profitLossPercent) >= 0 ? styles.positive : styles.negative
                   ]}>
-                    {parseFloat(holding.profitLossPercent) >= 0 ? '+' : ''}${holding.profitLoss.toFixed(2)} ({holding.profitLossPercent}%)
+                    {parseFloat(holding.profitLossPercent) >= 0 ? '+' : ''}
+                    ${Math.abs(holding.profitLoss).toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })} ({holding.profitLossPercent}%)
                   </Text>
                 </View>
               </View>
@@ -310,7 +354,7 @@ const handleBuy = () => {
           </Text>
         </View>
 
-        {/* Stats Section */}
+        {/* ✅ FIXED: Stats Section with Comma Formatting */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Stats</Text>
           
@@ -318,42 +362,59 @@ const handleBuy = () => {
             <View style={styles.detailedStatRow}>
               <Text style={styles.detailedStatLabel}>Open</Text>
               <Text style={styles.detailedStatValue}>
-                ${(assetData.price * 0.995).toFixed(2)}
+                ${(assetData.price * 0.995).toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
 
             <View style={styles.detailedStatRow}>
               <Text style={styles.detailedStatLabel}>High</Text>
               <Text style={styles.detailedStatValue}>
-                ${(assetData.price * 1.015).toFixed(2)}
+                ${(assetData.price * 1.015).toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
 
             <View style={styles.detailedStatRow}>
               <Text style={styles.detailedStatLabel}>Low</Text>
               <Text style={styles.detailedStatValue}>
-                ${(assetData.price * 0.985).toFixed(2)}
+                ${(assetData.price * 0.985).toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
 
             <View style={styles.detailedStatRow}>
               <Text style={styles.detailedStatLabel}>52 Week High</Text>
               <Text style={styles.detailedStatValue}>
-                ${(assetData.price * 1.35).toFixed(2)}
+                ${(assetData.price * 1.35).toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
 
             <View style={styles.detailedStatRow}>
               <Text style={styles.detailedStatLabel}>52 Week Low</Text>
               <Text style={styles.detailedStatValue}>
-                ${(assetData.price * 0.65).toFixed(2)}
+                ${(assetData.price * 0.65).toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
 
             <View style={styles.detailedStatRow}>
               <Text style={styles.detailedStatLabel}>Volume</Text>
               <Text style={styles.detailedStatValue}>
-                {((assetData.price * 10000000) / 1000000).toFixed(2)}M
+                {((assetData.price * 10000000) / 1000000).toLocaleString('en-US', {
+                  maximumFractionDigits: 2,
+                })}M
               </Text>
             </View>
 
@@ -406,7 +467,10 @@ const handleBuy = () => {
                     styles.historyAmount,
                     tx.action === 'buy' ? styles.negative : styles.positive
                   ]}>
-                    {tx.action === 'buy' ? '-' : '+'}${tx.totalAmount.toFixed(2)}
+                    {tx.action === 'buy' ? '-' : '+'}${tx.totalAmount.toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </Text>
                   <Text style={styles.historyDetails}>
                     {tx.quantity} at ${tx.price.toFixed(2)}
@@ -420,26 +484,20 @@ const handleBuy = () => {
         </View>
 
         <View style={styles.bottomSpacer} />
-        </ScrollView>
+      </ScrollView>
 
-{/* ✅ BUY/SELL BUTTONS - ALWAYS VISIBLE */}
-<View style={styles.fixedTradeButtons}>
-  <TouchableOpacity
-    style={[styles.tradeButton, styles.buyButton]}
-    onPress={handleBuy}
-  >
-    <Text style={styles.tradeButtonText}>Buy {symbol}</Text>
-  </TouchableOpacity>
-  
-  <TouchableOpacity
-    style={[styles.tradeButton, styles.sellButton]}
-    onPress={handleSell}
-  >
-    <Text style={styles.tradeButtonText}>Sell {symbol}</Text>
-  </TouchableOpacity>
-</View>
-</SafeAreaView>
-);
+      {/* Buy/Sell Buttons */}
+      <View style={styles.fixedTradeButtons}>
+        <TouchableOpacity style={[styles.tradeButton, styles.buyButton]} onPress={handleBuy}>
+          <Text style={styles.tradeButtonText}>Buy {symbol}</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.tradeButton, styles.sellButton]} onPress={handleSell}>
+          <Text style={styles.tradeButtonText}>Sell {symbol}</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -627,14 +685,13 @@ const styles = StyleSheet.create({
   negative: {
     color: '#FF5000',
   },
-  // ✅ BUY/SELL BUTTON STYLES
   fixedTradeButtons: {
     backgroundColor: '#000',
     borderTopWidth: 1,
     borderTopColor: '#333',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingBottom: 100,  // Extra space for tab bar
+    paddingBottom: 100,
     flexDirection: 'row',
     gap: 12,
   },
