@@ -1,5 +1,5 @@
 // ============================================
-// SETTINGS SCREEN - User preferences
+// SETTINGS SCREEN - WITH TRANSACTION HISTORY
 // ============================================
 
 import React from 'react';
@@ -79,7 +79,11 @@ export default function SettingsScreen({ navigation }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Portfolio</Text>
           
-          <TouchableOpacity style={styles.menuItem}>
+          {/* ⭐ UPDATED - Transaction History with Navigation */}
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('TransactionHistory')}
+          >
             <Text style={styles.menuItemText}>Transaction History</Text>
             <Text style={styles.menuItemChevron}>›</Text>
           </TouchableOpacity>

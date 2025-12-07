@@ -1,5 +1,5 @@
 // ============================================
-// DASHBOARD SCREEN - WITH TOKEN DEBUGGING
+// DASHBOARD SCREEN - WITH REALIZED P&L CARD
 // ============================================
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -30,7 +30,9 @@ import {
 } from '../services/api';
 import PortfolioChart from '../components/PortfolioChart';
 import Sparkline from '../components/Sparkline';
+import RealizedPLCard from '../components/RealizedPLCard'; // ⭐ NEW IMPORT
 import { Timeframe } from '../components/TimeframeSelector';
+import { saveWatchlistOrder, loadWatchlistOrder, applyCustomOrder } from '../utils/orderStorage';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -67,6 +69,7 @@ export default function DashboardScreen({ navigation }: any) {
     const [refreshing, setRefreshing] = useState(false);
     const [visibleWatchlistCount, setVisibleWatchlistCount] = useState(5);
     const [jwtErrorCount, setJwtErrorCount] = useState(0);
+    const [reorderingSymbol, setReorderingSymbol] = useState<string | null>(null);
     const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
 
     // ✅ Debug tokens on mount
@@ -179,7 +182,7 @@ export default function DashboardScreen({ navigation }: any) {
                 const watchlistResponse = await getWatchlist();
 
                 if (watchlistResponse.success && watchlistResponse.watchlist) {
-                    const items = watchlistResponse.watchlist
+                    const items: WatchlistItem[] = watchlistResponse.watchlist
                         .filter((item: any) => item && item.symbol)
                         .map((item: any) => ({
                             ...item,
@@ -187,12 +190,17 @@ export default function DashboardScreen({ navigation }: any) {
                         }));
                     
                     console.log(`✅ Loaded ${items.length} watchlist items`);
-                    setWatchlist(items);
+                    
+                    // Apply custom order
+                    const customOrder = await loadWatchlistOrder();
+                    const orderedItems = applyCustomOrder(items, customOrder);
+                    
+                    setWatchlist(orderedItems);
                     setJwtErrorCount(0);
 
-                    if (items.length > 0) {
-                        await loadPricesAllAtOnce(items);
-                        await loadSparklines(items);
+                    if (orderedItems.length > 0) {
+                        await loadPricesAllAtOnce(orderedItems);
+                        await loadSparklines(orderedItems);
                     }
                 }
             } catch (error: any) {
@@ -352,6 +360,45 @@ export default function DashboardScreen({ navigation }: any) {
         } catch (error) {
             console.error('Error removing from watchlist:', error);
         }
+    };
+
+    // ✅ NEW: Reordering functions
+    const handleLongPress = (symbol: string) => {
+        console.log('🔄 Reordering mode activated for:', symbol);
+        setReorderingSymbol(symbol);
+    };
+
+    const handleMoveUp = (symbol: string) => {
+        const currentIndex = watchlist.findIndex(w => w.symbol === symbol);
+        if (currentIndex <= 0) return; // Already at top
+        
+        const newWatchlist = [...watchlist];
+        const temp = newWatchlist[currentIndex];
+        newWatchlist[currentIndex] = newWatchlist[currentIndex - 1];
+        newWatchlist[currentIndex - 1] = temp;
+        
+        setWatchlist(newWatchlist);
+        saveWatchlistOrder(newWatchlist.map(w => w.symbol));
+        console.log('⬆️ Moved', symbol, 'up');
+    };
+
+    const handleMoveDown = (symbol: string) => {
+        const currentIndex = watchlist.findIndex(w => w.symbol === symbol);
+        if (currentIndex >= watchlist.length - 1) return; // Already at bottom
+        
+        const newWatchlist = [...watchlist];
+        const temp = newWatchlist[currentIndex];
+        newWatchlist[currentIndex] = newWatchlist[currentIndex + 1];
+        newWatchlist[currentIndex + 1] = temp;
+        
+        setWatchlist(newWatchlist);
+        saveWatchlistOrder(newWatchlist.map(w => w.symbol));
+        console.log('⬇️ Moved', symbol, 'down');
+    };
+
+    const handleCancelReorder = () => {
+        setReorderingSymbol(null);
+        console.log('❌ Reordering cancelled');
     };
 
     const renderRightActions = (
@@ -551,10 +598,15 @@ export default function DashboardScreen({ navigation }: any) {
                     </View>
                 )}
 
+                {/* ⭐⭐⭐ REALIZED P&L CARD - BETWEEN HOLDINGS AND WATCHLIST ⭐⭐⭐ */}
+                <RealizedPLCard 
+                    onPress={() => navigation.navigate('RealizedPL')}
+                />
+
                 {/* Watchlist Section - COLLAPSIBLE */}
                 <View style={styles.watchlistSection}>
                     <Text style={styles.sectionTitle}>Watchlist</Text>
-                    <Text style={styles.swipeHint}>Swipe left to remove</Text>
+                    <Text style={styles.swipeHint}>Swipe left to remove • Long press to reorder</Text>
 
                     {loading ? (
                         <View style={styles.loadingContainer}>
@@ -574,74 +626,120 @@ export default function DashboardScreen({ navigation }: any) {
                         <>
                             {watchlist.slice(0, visibleWatchlistCount).map((item) => {
                                 const isUp = (item.changePercent || 0) >= 0;
+                                const isReordering = reorderingSymbol === item.symbol;
+                                const currentIndex = watchlist.findIndex(w => w.symbol === item.symbol);
+                                const canMoveUp = currentIndex > 0;
+                                const canMoveDown = currentIndex < watchlist.length - 1;
+                                
                                 return (
-                                    <Swipeable
-                                        key={item.symbol}
-                                        ref={(ref) => {
-                                            if (ref) swipeableRefs.current[item.symbol] = ref;
-                                        }}
-                                        renderRightActions={(progress, dragX) =>
-                                            renderRightActions(progress, dragX, item.symbol)
-                                        }
-                                        overshootRight={false}
-                                        friction={1.5}
-                                        rightThreshold={40}
-                                    >
-                                        <TouchableOpacity
-                                            style={styles.watchlistItem}
-                                            onPress={() => handleAssetPress(item.symbol, item.name, item.type)}
-                                            activeOpacity={0.7}
+                                    <View key={item.symbol}>
+                                        <Swipeable
+                                            ref={(ref) => {
+                                                if (ref) swipeableRefs.current[item.symbol] = ref;
+                                            }}
+                                            renderRightActions={(progress, dragX) =>
+                                                renderRightActions(progress, dragX, item.symbol)
+                                            }
+                                            overshootRight={false}
+                                            friction={1.5}
+                                            rightThreshold={40}
+                                            enabled={!isReordering}
                                         >
-                                            <View style={styles.itemLeft}>
-                                                <Text style={styles.itemSymbol}>{item.symbol}</Text>
-                                                <Text style={styles.itemName} numberOfLines={1}>
-                                                    {item.name}
-                                                </Text>
-                                            </View>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.watchlistItem,
+                                                    isReordering && styles.watchlistItemReordering,
+                                                ]}
+                                                onPress={() => {
+                                                    if (reorderingSymbol) {
+                                                        handleCancelReorder();
+                                                    } else {
+                                                        handleAssetPress(item.symbol, item.name, item.type);
+                                                    }
+                                                }}
+                                                onLongPress={() => handleLongPress(item.symbol)}
+                                                delayLongPress={500}
+                                                activeOpacity={isReordering ? 1 : 0.7}
+                                            >
+                                                <View style={styles.itemLeft}>
+                                                    <Text style={styles.itemSymbol}>{item.symbol}</Text>
+                                                    <Text style={styles.itemName} numberOfLines={1}>
+                                                        {item.name}
+                                                    </Text>
+                                                </View>
 
-                                            <View style={styles.watchlistRight}>
-                                                {item.loading ? (
-                                                    <ActivityIndicator size="small" color="#00C805" />
-                                                ) : item.price ? (
-                                                    <>
-                                                        <View style={styles.sparklineWrapper}>
-                                                            {item.history && item.history.length > 0 ? (
-                                                                <Sparkline
-                                                                    data={item.history}
-                                                                    width={60}
-                                                                    height={30}
-                                                                    color={isUp ? '#00C805' : '#FF5000'}
-                                                                />
-                                                            ) : (
-                                                                <View style={styles.sparklinePlaceholder}>
-                                                                    <Text style={styles.sparklinePlaceholderText}>—</Text>
-                                                                </View>
-                                                            )}
-                                                        </View>
-                                                        <View style={styles.priceInfo}>
-                                                            <Text style={styles.itemPrice}>
-                                                                ${item.price.toLocaleString('en-US', {
-                                                                    minimumFractionDigits: 2,
-                                                                    maximumFractionDigits: 2,
-                                                                })}
-                                                            </Text>
-                                                            <Text
-                                                                style={[
-                                                                    styles.itemChange,
-                                                                    isUp ? styles.positive : styles.negative,
-                                                                ]}
-                                                            >
-                                                                {isUp ? '+' : ''}
-                                                                {item.changePercent?.toFixed(2)}%
-                                                            </Text>
-                                                        </View>
-                                                    </>
-                                                ) : (
-                                                    <Text style={styles.itemError}>---</Text>
-                                                )}
+                                                <View style={styles.watchlistRight}>
+                                                    {item.loading ? (
+                                                        <ActivityIndicator size="small" color="#00C805" />
+                                                    ) : item.price ? (
+                                                        <>
+                                                            <View style={styles.sparklineWrapper}>
+                                                                {item.history && item.history.length > 0 ? (
+                                                                    <Sparkline
+                                                                        data={item.history}
+                                                                        width={60}
+                                                                        height={30}
+                                                                        color={isUp ? '#00C805' : '#FF5000'}
+                                                                    />
+                                                                ) : (
+                                                                    <View style={styles.sparklinePlaceholder}>
+                                                                        <Text style={styles.sparklinePlaceholderText}>—</Text>
+                                                                    </View>
+                                                                )}
+                                                            </View>
+                                                            <View style={styles.priceInfo}>
+                                                                <Text style={styles.itemPrice}>
+                                                                    ${item.price.toLocaleString('en-US', {
+                                                                        minimumFractionDigits: 2,
+                                                                        maximumFractionDigits: 2,
+                                                                    })}
+                                                                </Text>
+                                                                <Text
+                                                                    style={[
+                                                                        styles.itemChange,
+                                                                        isUp ? styles.positive : styles.negative,
+                                                                    ]}
+                                                                >
+                                                                    {isUp ? '+' : ''}
+                                                                    {item.changePercent?.toFixed(2)}%
+                                                                </Text>
+                                                            </View>
+                                                        </>
+                                                    ) : (
+                                                        <Text style={styles.itemError}>---</Text>
+                                                    )}
+                                                </View>
+                                            </TouchableOpacity>
+                                        </Swipeable>
+                                        
+                                        {/* ✅ REORDER CONTROLS */}
+                                        {isReordering && (
+                                            <View style={styles.reorderControls}>
+                                                <TouchableOpacity
+                                                    style={[styles.reorderButton, !canMoveUp && styles.reorderButtonDisabled]}
+                                                    onPress={() => handleMoveUp(item.symbol)}
+                                                    disabled={!canMoveUp}
+                                                >
+                                                    <Text style={styles.reorderButtonText}>↑ Move Up</Text>
+                                                </TouchableOpacity>
+                                                
+                                                <TouchableOpacity
+                                                    style={[styles.reorderButton, !canMoveDown && styles.reorderButtonDisabled]}
+                                                    onPress={() => handleMoveDown(item.symbol)}
+                                                    disabled={!canMoveDown}
+                                                >
+                                                    <Text style={styles.reorderButtonText}>↓ Move Down</Text>
+                                                </TouchableOpacity>
+                                                
+                                                <TouchableOpacity
+                                                    style={styles.cancelButton}
+                                                    onPress={handleCancelReorder}
+                                                >
+                                                    <Text style={styles.cancelButtonText}>✕</Text>
+                                                </TouchableOpacity>
                                             </View>
-                                        </TouchableOpacity>
-                                    </Swipeable>
+                                        )}
+                                    </View>
                                 );
                             })}
                             
@@ -948,5 +1046,54 @@ const styles = StyleSheet.create({
     },
     bottomSpacer: {
         height: 100,
+    },
+    // ✅ REORDER CONTROLS
+    watchlistItemReordering: {
+        backgroundColor: '#1a1a1a',
+        borderBottomColor: '#333',
+        borderBottomWidth: 2,
+    },
+    reorderControls: {
+        flexDirection: 'row',
+        backgroundColor: '#0a0a0a',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1a1a1a',
+        gap: 8,
+    },
+    reorderButton: {
+        flex: 1,
+        backgroundColor: '#1a1a1a',
+        paddingVertical: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#333',
+    },
+    reorderButtonDisabled: {
+        backgroundColor: '#0a0a0a',
+        borderColor: '#1a1a1a',
+        opacity: 0.5,
+    },
+    reorderButtonText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    cancelButton: {
+        width: 44,
+        backgroundColor: '#1a1a1a',
+        paddingVertical: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#333',
+    },
+    cancelButtonText: {
+        color: '#8B0000',
+        fontSize: 18,
+        fontWeight: 'bold',
     },
 });

@@ -1,8 +1,8 @@
 // ============================================
-// TRADE CONFIRMATION SCREEN - Simplified dollar entry
+// TRADE CONFIRMATION SCREEN - FIXED CASH BALANCE
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,59 @@ import {
   StatusBar,
   Alert,
 } from 'react-native';
+import { useAuthStore } from '../store/authStore';
+import { getHoldings } from '../services/api';
 
 export default function TradeConfirmationScreen({ route, navigation }: any) {
   const { symbol, name, type, currentPrice, action, holding } = route.params;
+  const { user } = useAuthStore();
 
   const [dollarAmount, setDollarAmount] = useState('0');
+  const [actualCashBalance, setActualCashBalance] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  // Calculate available balance
-  const availableBalance = action === 'buy' ? 12869.79 : (holding?.quantity || 0) * currentPrice;
+  // ✅ FETCH ACTUAL CASH BALANCE ON MOUNT
+  useEffect(() => {
+    fetchActualCash();
+  }, []);
+
+  const fetchActualCash = async () => {
+    try {
+      // Get all holdings to calculate total holdings value
+      const response = await getHoldings();
+      if (response.success && response.holdings) {
+        const holdingsValue = response.holdings.reduce(
+          (sum: number, h: any) => sum + (h.currentValue || 0),
+          0
+        );
+        
+        // Total portfolio = holdings + cash
+        const totalPortfolio = (user?.cashBalance || 0) + holdingsValue;
+        
+        // Cash balance = total - holdings
+        const currentCash = totalPortfolio - holdingsValue;
+        
+        setActualCashBalance(currentCash);
+        console.log(`💰 Actual cash balance: $${currentCash.toFixed(2)}`);
+        console.log(`   Holdings value: $${holdingsValue.toFixed(2)}`);
+        console.log(`   Total portfolio: $${totalPortfolio.toFixed(2)}`);
+      } else {
+        // Fallback to user cash balance
+        setActualCashBalance(user?.cashBalance || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching cash balance:', error);
+      // Fallback to user cash balance
+      setActualCashBalance(user?.cashBalance || 0);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIXED: Use actual cash balance, not hardcoded value
+  const availableBalance = action === 'buy' 
+    ? actualCashBalance 
+    : (holding?.quantity || 0) * currentPrice;
 
   // Handle number pad input
   const handleNumberPress = (num: string) => {
@@ -54,9 +99,8 @@ export default function TradeConfirmationScreen({ route, navigation }: any) {
       const ownedShares = holding?.quantity || 0;
       
       // Smart rounding: If within 0.1% of owned shares, sell exactly owned amount
-      // This handles cases where user enters exact dollar value but floating point causes issues
       const percentDifference = Math.abs(shares - ownedShares) / ownedShares;
-      if (percentDifference <= 0.001) {  // Within 0.1%
+      if (percentDifference <= 0.001) {
         console.log(`📊 Smart rounding: ${shares.toFixed(6)} → ${ownedShares.toFixed(6)} (selling all)`);
         shares = ownedShares;
       }
@@ -76,7 +120,7 @@ export default function TradeConfirmationScreen({ route, navigation }: any) {
     if (action === 'buy' && amount > availableBalance) {
       Alert.alert(
         'Insufficient Funds',
-        `You only have $${availableBalance.toFixed(2)} available.`,
+        `You only have $${availableBalance.toFixed(2)} available. You tried to spend $${amount.toFixed(2)}.`,
         [{ text: 'OK' }]
       );
       return;
@@ -95,7 +139,7 @@ export default function TradeConfirmationScreen({ route, navigation }: any) {
     });
   };
 
-  // Handle Max button - sell 100% of holdings
+  // Handle Max button
   const handleMax = () => {
     if (action === 'sell' && holding) {
       const maxValue = (holding.quantity * currentPrice).toFixed(2);
@@ -105,7 +149,7 @@ export default function TradeConfirmationScreen({ route, navigation }: any) {
     }
   };
 
-  const isReviewDisabled = parseFloat(dollarAmount) <= 0;
+  const isReviewDisabled = parseFloat(dollarAmount) <= 0 || loading;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -122,7 +166,6 @@ export default function TradeConfirmationScreen({ route, navigation }: any) {
 
       {/* Content - Dollar Amount Centered */}
       <View style={styles.content}>
-        {/* Dollar Amount - Centered in available space */}
         <View style={styles.amountContainer}>
           <Text style={styles.dollarAmount}>${dollarAmount}</Text>
           <Text style={styles.oneTime}>One time</Text>
@@ -134,12 +177,17 @@ export default function TradeConfirmationScreen({ route, navigation }: any) {
         {/* Available Balance with Max Button */}
         <View style={styles.availableRow}>
           <Text style={styles.availableText}>
-            {action === 'buy' 
-              ? `$${availableBalance.toFixed(2)} available`
-              : `${(holding?.quantity || 0).toFixed(6)} ${symbol} ($${availableBalance.toFixed(2)}) available`
-            }
+            {loading ? 'Loading...' : (
+              action === 'buy' 
+                ? `$${availableBalance.toFixed(2)} available`
+                : `${(holding?.quantity || 0).toFixed(6)} ${symbol} ($${availableBalance.toFixed(2)}) available`
+            )}
           </Text>
-          <TouchableOpacity style={styles.maxButton} onPress={handleMax}>
+          <TouchableOpacity 
+            style={styles.maxButton} 
+            onPress={handleMax}
+            disabled={loading}
+          >
             <Text style={styles.maxButtonText}>Max</Text>
           </TouchableOpacity>
         </View>
@@ -150,7 +198,9 @@ export default function TradeConfirmationScreen({ route, navigation }: any) {
           onPress={handleReview}
           disabled={isReviewDisabled}
         >
-          <Text style={styles.reviewButtonText}>Review</Text>
+          <Text style={styles.reviewButtonText}>
+            {loading ? 'Loading...' : 'Review'}
+          </Text>
         </TouchableOpacity>
 
         {/* Number Pad */}

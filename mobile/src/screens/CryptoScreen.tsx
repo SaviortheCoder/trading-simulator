@@ -1,6 +1,6 @@
 // ============================================
-// CRYPTO SCREEN - ENHANCED WITH COLLAPSEABLE HOLDINGS
-// Fixed import path, collapseable section, better error handling
+// CRYPTO SCREEN - SIMPLE LONG-PRESS REORDERING
+// Long press → Up/Down arrows → Smooth animations
 // ============================================
 
 import React, { useState, useCallback } from 'react';
@@ -13,6 +13,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   SafeAreaView,
+  Animated,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { 
@@ -24,7 +25,8 @@ import {
 import PortfolioChart from '../components/PortfolioChart';
 import Sparkline from '../components/Sparkline';
 import { Timeframe } from '../components/TimeframeSelector';
-import { formatCurrency, formatPercent, formatCryptoQuantity } from '../utils/formatUtils';  // ✅ FIXED PATH
+import { formatCurrency, formatPercent, formatCryptoQuantity } from '../utils/formatUtils';
+import { saveCryptoOrder, loadCryptoOrder, applyCustomOrder } from '../utils/orderStorage';
 
 interface Holding {
   symbol: string;
@@ -78,9 +80,11 @@ const CryptoScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingChart, setLoadingChart] = useState(true);
   
-  // ✅ NEW: Collapseable state
   const [holdingsExpanded, setHoldingsExpanded] = useState(true);
   const [visibleCryptoCount, setVisibleCryptoCount] = useState(5);
+  
+  // ✅ NEW: Reordering state
+  const [reorderingSymbol, setReorderingSymbol] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -109,7 +113,7 @@ const CryptoScreen = () => {
         console.error('❌ Error loading crypto holdings:', error);
       }
 
-      // Load crypto portfolio history if user has crypto
+      // Load crypto portfolio history
       if (cryptoOnly.length > 0) {
         try {
           console.log('📈 Loading crypto portfolio history...');
@@ -138,7 +142,7 @@ const CryptoScreen = () => {
         type: 'crypto'
       }));
       
-      // Load all prices using api.ts
+      // Load all prices
       console.log('💰 Loading crypto prices...');
       const response = await getBulkPrices(symbols);
       
@@ -156,10 +160,12 @@ const CryptoScreen = () => {
           };
         });
         
-        setCryptos(cryptoData);
-
-        // Load sparklines
-        await loadSparklines(cryptoData);
+        // Apply custom order
+        const customOrder = await loadCryptoOrder();
+        const orderedCryptos = applyCustomOrder(cryptoData, customOrder);
+        
+        setCryptos(orderedCryptos);
+        await loadSparklines(orderedCryptos);
       }
     } catch (error) {
       console.error('❌ Error loading cryptos:', error);
@@ -211,6 +217,12 @@ const CryptoScreen = () => {
   };
 
   const handleCryptoPress = (crypto: CryptoPrice) => {
+    // Don't navigate if reordering
+    if (reorderingSymbol) {
+      setReorderingSymbol(null);
+      return;
+    }
+    
     navigation.navigate('AssetDetail', { 
       symbol: crypto.symbol, 
       name: crypto.name,
@@ -218,55 +230,134 @@ const CryptoScreen = () => {
     });
   };
 
-  // ✅ NEW: Load more cryptos
   const handleLoadMore = async () => {
     const newCount = Math.min(visibleCryptoCount + 5, cryptos.length);
     setVisibleCryptoCount(newCount);
-    
-    // Load sparklines for newly visible cryptos
     await loadSparklines(cryptos);
+  };
+
+  // ✅ NEW: Handle long press - start reordering
+  const handleLongPress = (symbol: string) => {
+    console.log('🔄 Reordering mode activated for:', symbol);
+    setReorderingSymbol(symbol);
+  };
+
+  // ✅ NEW: Move item up
+  const handleMoveUp = (symbol: string) => {
+    const currentIndex = cryptos.findIndex(c => c.symbol === symbol);
+    if (currentIndex <= 0) return; // Already at top
+    
+    const newCryptos = [...cryptos];
+    const temp = newCryptos[currentIndex];
+    newCryptos[currentIndex] = newCryptos[currentIndex - 1];
+    newCryptos[currentIndex - 1] = temp;
+    
+    setCryptos(newCryptos);
+    saveCryptoOrder(newCryptos.map(c => c.symbol));
+    console.log('⬆️ Moved', symbol, 'up');
+  };
+
+  // ✅ NEW: Move item down
+  const handleMoveDown = (symbol: string) => {
+    const currentIndex = cryptos.findIndex(c => c.symbol === symbol);
+    if (currentIndex >= cryptos.length - 1) return; // Already at bottom
+    
+    const newCryptos = [...cryptos];
+    const temp = newCryptos[currentIndex];
+    newCryptos[currentIndex] = newCryptos[currentIndex + 1];
+    newCryptos[currentIndex + 1] = temp;
+    
+    setCryptos(newCryptos);
+    saveCryptoOrder(newCryptos.map(c => c.symbol));
+    console.log('⬇️ Moved', symbol, 'down');
+  };
+
+  // ✅ NEW: Cancel reordering
+  const handleCancelReorder = () => {
+    setReorderingSymbol(null);
+    console.log('❌ Reordering cancelled');
   };
 
   const renderCryptoItem = ({ item }: { item: CryptoPrice }) => {
     const isPositive = item.changePercent >= 0;
+    const isReordering = reorderingSymbol === item.symbol;
+    const currentIndex = cryptos.findIndex(c => c.symbol === item.symbol);
+    const canMoveUp = currentIndex > 0;
+    const canMoveDown = currentIndex < cryptos.length - 1;
 
     return (
-      <TouchableOpacity
-        style={styles.cryptoItem}
-        onPress={() => handleCryptoPress(item)}
-      >
-        <View style={styles.cryptoInfo}>
-          <Text style={styles.cryptoSymbol}>{item.symbol}</Text>
-          <Text style={styles.cryptoName}>{item.name}</Text>
-        </View>
+      <View>
+        <TouchableOpacity
+          style={[
+            styles.cryptoItem,
+            isReordering && styles.cryptoItemReordering,
+          ]}
+          onPress={() => handleCryptoPress(item)}
+          onLongPress={() => handleLongPress(item.symbol)}
+          delayLongPress={500}
+          activeOpacity={isReordering ? 1 : 0.7}
+        >
+          <View style={styles.cryptoInfo}>
+            <Text style={styles.cryptoSymbol}>{item.symbol}</Text>
+            <Text style={styles.cryptoName}>{item.name}</Text>
+          </View>
 
-        <View style={styles.cryptoRight}>
-          {item.price > 0 ? (
-            <>
-              <View style={styles.sparklineWrapper}>
-                {item.history && item.history.length > 0 && (
-                  <Sparkline
-                    data={item.history}
-                    width={60}
-                    height={30}
-                    color={isPositive ? '#00C805' : '#FF5000'}
-                  />
-                )}
-              </View>
-              <View style={styles.priceInfo}>
-                <Text style={styles.cryptoPrice}>
-                  {formatCurrency(item.price)}
-                </Text>
-                <Text style={[styles.cryptoChange, isPositive ? styles.positive : styles.negative]}>
-                  {formatPercent(item.changePercent)}
-                </Text>
-              </View>
-            </>
-          ) : (
-            <ActivityIndicator size="small" color="#00C805" />
-          )}
-        </View>
-      </TouchableOpacity>
+          <View style={styles.cryptoRight}>
+            {item.price > 0 ? (
+              <>
+                <View style={styles.sparklineWrapper}>
+                  {item.history && item.history.length > 0 && (
+                    <Sparkline
+                      data={item.history}
+                      width={60}
+                      height={30}
+                      color={isPositive ? '#00C805' : '#FF5000'}
+                    />
+                  )}
+                </View>
+                <View style={styles.priceInfo}>
+                  <Text style={styles.cryptoPrice}>
+                    {formatCurrency(item.price)}
+                  </Text>
+                  <Text style={[styles.cryptoChange, isPositive ? styles.positive : styles.negative]}>
+                    {formatPercent(item.changePercent)}
+                  </Text>
+                </View>
+              </>
+            ) : (
+              <ActivityIndicator size="small" color="#00C805" />
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {/* ✅ REORDER CONTROLS */}
+        {isReordering && (
+          <View style={styles.reorderControls}>
+            <TouchableOpacity
+              style={[styles.reorderButton, !canMoveUp && styles.reorderButtonDisabled]}
+              onPress={() => handleMoveUp(item.symbol)}
+              disabled={!canMoveUp}
+            >
+              <Text style={styles.reorderButtonText}>↑ Move Up</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.reorderButton, !canMoveDown && styles.reorderButtonDisabled]}
+              onPress={() => handleMoveDown(item.symbol)}
+              disabled={!canMoveDown}
+            >
+              <Text style={styles.reorderButtonText}>↓ Move Down</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={handleCancelReorder}
+            >
+              <Text style={styles.cancelButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     );
   };
 
@@ -336,7 +427,7 @@ const CryptoScreen = () => {
                 </View>
               )}
 
-              {/* ✅ NEW: COLLAPSEABLE Crypto Holdings */}
+              {/* Crypto Holdings */}
               {cryptoHoldings.length > 0 && (
                 <View style={styles.holdingsSection}>
                   <TouchableOpacity 
@@ -387,12 +478,12 @@ const CryptoScreen = () => {
               {/* Section Title */}
               <View style={styles.listHeaderSection}>
                 <Text style={styles.sectionTitle}>All Cryptocurrencies</Text>
+                <Text style={styles.dragHint}>Long press to reorder</Text>
               </View>
             </>
           }
           ListFooterComponent={
             <>
-              {/* Load More Button */}
               {visibleCryptoCount < cryptos.length && (
                 <TouchableOpacity
                   style={styles.loadMoreButton}
@@ -404,7 +495,6 @@ const CryptoScreen = () => {
                 </TouchableOpacity>
               )}
               
-              {/* Show Less Button */}
               {visibleCryptoCount > 5 && (
                 <TouchableOpacity
                   style={styles.showLessButton}
@@ -554,19 +644,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  collapseButton: {
-    marginTop: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  collapseText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
   listHeaderSection: {
     paddingHorizontal: 16,
     marginBottom: 8,
+  },
+  dragHint: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
   loadingContainer: {
     flex: 1,
@@ -587,8 +672,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
+    backgroundColor: '#000',
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
+  },
+  cryptoItemReordering: {
+    backgroundColor: '#1a1a1a',
+    borderBottomColor: '#00C805',
+    borderBottomWidth: 2,
   },
   cryptoInfo: {
     flex: 1,
@@ -627,6 +718,50 @@ const styles = StyleSheet.create({
   cryptoChange: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  // ✅ NEW: Reorder controls
+  reorderControls: {
+    flexDirection: 'row',
+    backgroundColor: '#0a0a0a',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+    gap: 8,
+  },
+  reorderButton: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  reorderButtonDisabled: {
+    backgroundColor: '#0a0a0a',
+    borderColor: '#1a1a1a',
+    opacity: 0.5,
+  },
+  reorderButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    width: 44,
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  cancelButtonText: {
+    color: '#8B0000',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   loadMoreButton: {
     marginTop: 16,

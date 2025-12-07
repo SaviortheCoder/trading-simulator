@@ -1,5 +1,5 @@
 // ============================================
-// APP NAVIGATOR - FIXED TAB ORDER
+// APP NAVIGATOR - WITH P&L SCREENS
 // Home, Crypto, Search, Settings
 // ============================================
 
@@ -20,6 +20,8 @@ import SettingsScreen from '../screens/SettingsScreen';
 import AssetDetailScreen from '../screens/AssetDetailScreen';
 import TradeConfirmationScreen from '../screens/TradeConfirmationScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
+import RealizedPLScreen from '../screens/RealizedPLScreen'; // ⭐ NEW
+import TransactionHistoryScreen from '../screens/TransactionHistoryScreen'; // ⭐ NEW
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -163,6 +165,12 @@ function HomeStackScreen() {
           animation: 'slide_from_bottom'
         }}
       />
+      {/* ⭐ NEW - Realized P&L Screen */}
+      <HomeStack.Screen 
+        name="RealizedPL" 
+        component={RealizedPLScreen}
+        options={{ headerShown: false }}
+      />
     </HomeStack.Navigator>
   );
 }
@@ -221,7 +229,23 @@ function SearchStackScreen() {
   );
 }
 
-// ✅ FIXED TAB ORDER: Home, Crypto, Search, Settings
+const SettingsStack = createNativeStackNavigator();
+
+function SettingsStackScreen() {
+  return (
+    <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
+      <SettingsStack.Screen name="SettingsMain" component={SettingsScreen} />
+      {/* ⭐ NEW - Transaction History Screen */}
+      <SettingsStack.Screen 
+        name="TransactionHistory" 
+        component={TransactionHistoryScreen}
+        options={{ headerShown: false }}
+      />
+    </SettingsStack.Navigator>
+  );
+}
+
+// ✅ TAB ORDER: Home, Crypto, Search, Settings
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -274,7 +298,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Settings"
-        component={SettingsScreen}
+        component={SettingsStackScreen}
         options={{
           tabBarIcon: SettingsIcon,
           tabBarLabel: 'Settings',

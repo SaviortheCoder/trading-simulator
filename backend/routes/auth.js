@@ -1,11 +1,14 @@
 // ============================================
 // AUTHENTICATION ROUTES - Register, Login, Logout
+// UPDATED: Returns current Portfolio cash balance
 // ============================================
 
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const Portfolio = require('../models/Portfolio');  // ✅ ADDED
+const Holding = require('../models/Holding');      // ✅ ADDED
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt');
 const authenticate = require('../middleware/auth');
 
@@ -50,6 +53,12 @@ router.post('/register', async (req, res) => {
       portfolioValue: 0,
       totalValue: 100000
     });
+
+    // ✅ CREATE PORTFOLIO FOR NEW USER
+    const portfolio = await Portfolio.create({
+      userId: user._id,
+      cashBalance: 100000
+    });
     
     // Generate tokens
     const accessToken = generateAccessToken(user._id);
@@ -72,8 +81,8 @@ router.post('/register', async (req, res) => {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        cashBalance: user.cashBalance,
-        totalValue: user.totalValue
+        cashBalance: portfolio.cashBalance,  // ✅ From Portfolio
+        totalValue: portfolio.cashBalance     // ✅ From Portfolio
       },
       accessToken,
       refreshToken
@@ -123,6 +132,32 @@ router.post('/login', async (req, res) => {
         error: 'Invalid credentials'
       });
     }
+
+    // ✅ GET CURRENT PORTFOLIO DATA
+    let portfolio = await Portfolio.findOne({ userId: user._id });
+    
+    if (!portfolio) {
+      // Create portfolio if it doesn't exist
+      portfolio = await Portfolio.create({
+        userId: user._id,
+        cashBalance: 100000
+      });
+      console.log('✅ Created missing portfolio for user:', user._id);
+    }
+
+    // ✅ GET HOLDINGS FOR TOTAL VALUE
+    const holdings = await Holding.find({ userId: user._id });
+    const holdingsValue = holdings.reduce((total, holding) => {
+      return total + (holding.quantity * holding.avgBuyPrice);
+    }, 0);
+
+    const totalValue = portfolio.cashBalance + holdingsValue;
+
+    console.log(`💰 User ${user.email} portfolio:`, {
+      cash: portfolio.cashBalance,
+      holdings: holdingsValue,
+      total: totalValue
+    });
     
     // Generate tokens
     const accessToken = generateAccessToken(user._id);
@@ -146,8 +181,8 @@ router.post('/login', async (req, res) => {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        cashBalance: user.cashBalance,
-        totalValue: user.totalValue
+        cashBalance: portfolio.cashBalance,  // ✅ CURRENT VALUE FROM PORTFOLIO
+        totalValue: totalValue                // ✅ REAL-TIME TOTAL
       },
       accessToken,
       refreshToken
@@ -263,6 +298,24 @@ router.post('/logout', async (req, res) => {
 
 router.get('/me', authenticate, async (req, res) => {
   try {
+    // ✅ GET CURRENT PORTFOLIO DATA
+    let portfolio = await Portfolio.findOne({ userId: req.user._id });
+    
+    if (!portfolio) {
+      portfolio = await Portfolio.create({
+        userId: req.user._id,
+        cashBalance: 100000
+      });
+    }
+
+    // ✅ GET HOLDINGS FOR TOTAL VALUE
+    const holdings = await Holding.find({ userId: req.user._id });
+    const holdingsValue = holdings.reduce((total, holding) => {
+      return total + (holding.quantity * holding.avgBuyPrice);
+    }, 0);
+
+    const totalValue = portfolio.cashBalance + holdingsValue;
+
     res.json({
       success: true,
       user: {
@@ -270,8 +323,8 @@ router.get('/me', authenticate, async (req, res) => {
         email: req.user.email,
         firstName: req.user.firstName,
         lastName: req.user.lastName,
-        cashBalance: req.user.cashBalance,
-        totalValue: req.user.totalValue
+        cashBalance: portfolio.cashBalance,  // ✅ CURRENT VALUE
+        totalValue: totalValue                // ✅ REAL-TIME TOTAL
       }
     });
   } catch (error) {
