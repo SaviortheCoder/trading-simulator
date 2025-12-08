@@ -1,6 +1,8 @@
 // ============================================
-// ASSET DETAIL SCREEN - COMPLETE FIX
-// Portfolio diversity, today's return, comma formatting
+// ASSET DETAIL SCREEN - COMPLETE WITH ALL FIXES
+// - Duplicate watchlist prevention
+// - No 404 errors (removed unnecessary API calls)
+// - All existing features preserved
 // ============================================
 
 import React, { useEffect, useState } from 'react';
@@ -18,12 +20,14 @@ import { useAuthStore } from '../store/authStore';
 import { 
   getStockPrice, 
   getCryptoPrice, 
-  addToWatchlist, 
+  addToWatchlist,
+  removeFromWatchlist,
+  getWatchlist, // ✅ NEW - check if already in watchlist
   getStockHistory,
   getCryptoHistory,
   getHolding,
   getSymbolTransactions,
-  getHoldings  // ✅ ADDED - needed for total portfolio calculation
+  getHoldings
 } from '../services/api';
 import PortfolioChart from '../components/PortfolioChart';
 import { Timeframe } from '../components/TimeframeSelector';
@@ -46,33 +50,50 @@ export default function AssetDetailScreen({ route, navigation }: any) {
   const [holding, setHolding] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [totalPortfolioValue, setTotalPortfolioValue] = useState(100000);  // ✅ ADDED
+  const [totalPortfolioValue, setTotalPortfolioValue] = useState(100000);
+  
+  // ✅ NEW: Watchlist state
+  const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [checkingWatchlist, setCheckingWatchlist] = useState(true);
 
   useEffect(() => {
     loadAssetData();
     loadHoldingData();
     loadTransactionHistory();
-    loadTotalPortfolioValue();  // ✅ ADDED
+    loadTotalPortfolioValue();
+    checkWatchlistStatus(); // ✅ NEW
   }, []);
 
-  // ✅ NEW FUNCTION - Calculate total portfolio value (cash + all holdings)
+  // ✅ NEW: Check if already in watchlist
+  const checkWatchlistStatus = async () => {
+    try {
+      const response = await getWatchlist();
+      if (response.success && response.watchlist) {
+        const inList = response.watchlist.some((item: any) => item.symbol === symbol);
+        setIsInWatchlist(inList);
+        console.log(`📋 ${symbol} in watchlist:`, inList);
+      }
+    } catch (error) {
+      console.error('Error checking watchlist:', error);
+    } finally {
+      setCheckingWatchlist(false);
+    }
+  };
+
   const loadTotalPortfolioValue = async () => {
     try {
       const response = await getHoldings();
       if (response.success && response.holdings) {
-        // Sum up all holdings values
         const holdingsValue = response.holdings.reduce(
           (sum: number, h: any) => sum + (h.currentValue || 0), 
           0
         );
-        // Total = holdings + cash
         const totalValue = (user?.cashBalance || 0) + holdingsValue;
         setTotalPortfolioValue(totalValue);
-        console.log(`💰 Total Portfolio Value: $${totalValue.toFixed(2)} (Holdings: $${holdingsValue.toFixed(2)} + Cash: $${user?.cashBalance || 0})`);
+        console.log(`💰 Total Portfolio Value: $${totalValue.toFixed(2)}`);
       }
     } catch (error) {
       console.error('Error loading total portfolio value:', error);
-      // Fallback to cash balance only
       setTotalPortfolioValue(user?.cashBalance || 100000);
     }
   };
@@ -149,13 +170,36 @@ export default function AssetDetailScreen({ route, navigation }: any) {
     loadPriceHistory(days);
   };
 
+  // ✅ FIXED: Duplicate prevention
   const handleAddToWatchlist = async () => {
+    if (isInWatchlist) {
+      Alert.alert(
+        'Already in Watchlist',
+        `${name} is already in your watchlist.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     try {
       await addToWatchlist(symbol, name || symbol, type || 'stock');
+      setIsInWatchlist(true);
       Alert.alert('Success', `${symbol} added to watchlist`);
     } catch (error) {
       console.error('Error adding to watchlist:', error);
       Alert.alert('Error', 'Failed to add to watchlist');
+    }
+  };
+
+  // ✅ NEW: Remove from watchlist
+  const handleRemoveFromWatchlist = async () => {
+    try {
+      await removeFromWatchlist(symbol);
+      setIsInWatchlist(false);
+      Alert.alert('Removed', `${symbol} removed from watchlist`);
+    } catch (error) {
+      console.error('Error removing from watchlist:', error);
+      Alert.alert('Error', 'Failed to remove from watchlist');
     }
   };
 
@@ -219,7 +263,6 @@ export default function AssetDetailScreen({ route, navigation }: any) {
 
   const isPositive = (assetData.changePercent || 0) >= 0;
   
-  // ✅ FIXED: Portfolio diversity using TOTAL portfolio value (cash + holdings)
   const portfolioDiversity = holding && totalPortfolioValue > 0
     ? ((holding.currentValue / totalPortfolioValue) * 100) 
     : 0;
@@ -240,9 +283,24 @@ export default function AssetDetailScreen({ route, navigation }: any) {
           </Text>
           <Text style={styles.headerName}>{symbol}</Text>
         </View>
-        <TouchableOpacity onPress={handleAddToWatchlist} style={styles.watchlistButton}>
-          <Text style={styles.watchlistButtonText}>+</Text>
-        </TouchableOpacity>
+        
+        {/* ✅ FIXED: Dynamic watchlist button */}
+        {checkingWatchlist ? (
+          <View style={styles.watchlistButton}>
+            <ActivityIndicator size="small" color="#00C805" />
+          </View>
+        ) : isInWatchlist ? (
+          <TouchableOpacity 
+            onPress={handleRemoveFromWatchlist} 
+            style={[styles.watchlistButton, styles.watchlistButtonAdded]}
+          >
+            <Text style={[styles.watchlistButtonText, styles.watchlistButtonTextAdded]}>✓</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity onPress={handleAddToWatchlist} style={styles.watchlistButton}>
+            <Text style={styles.watchlistButtonText}>+</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -307,7 +365,6 @@ export default function AssetDetailScreen({ route, navigation }: any) {
                 </View>
               </View>
 
-              {/* ✅ FIXED: Use holding.todaysReturn from backend instead of calculating */}
               <View style={styles.positionRowFull}>
                 <View style={styles.positionItem}>
                   <Text style={styles.positionLabel}>Today's return</Text>
@@ -354,7 +411,7 @@ export default function AssetDetailScreen({ route, navigation }: any) {
           </Text>
         </View>
 
-        {/* ✅ FIXED: Stats Section with Comma Formatting */}
+        {/* Stats Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Stats</Text>
           
@@ -550,9 +607,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  watchlistButtonAdded: {
+    backgroundColor: '#00C805',
+    borderColor: '#00C805',
+  },
   watchlistButtonText: {
     fontSize: 24,
     color: '#00C805',
+  },
+  watchlistButtonTextAdded: {
+    color: '#000',
   },
   content: {
     flex: 1,

@@ -1,5 +1,8 @@
 // ============================================
-// DASHBOARD SCREEN - WITH REALIZED P&L CARD
+// DASHBOARD SCREEN - COMPLETE WITH ALL FIXES
+// - Instant reorder persistence (async/await)
+// - Delete updates saved order
+// - All existing features preserved
 // ============================================
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -30,7 +33,7 @@ import {
 } from '../services/api';
 import PortfolioChart from '../components/PortfolioChart';
 import Sparkline from '../components/Sparkline';
-import RealizedPLCard from '../components/RealizedPLCard'; // ⭐ NEW IMPORT
+import RealizedPLCard from '../components/RealizedPLCard';
 import { Timeframe } from '../components/TimeframeSelector';
 import { saveWatchlistOrder, loadWatchlistOrder, applyCustomOrder } from '../utils/orderStorage';
 
@@ -72,7 +75,6 @@ export default function DashboardScreen({ navigation }: any) {
     const [reorderingSymbol, setReorderingSymbol] = useState<string | null>(null);
     const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
 
-    // ✅ Debug tokens on mount
     useEffect(() => {
         const debugTokens = async () => {
             console.log('🔍 DashboardScreen - Checking tokens...');
@@ -112,7 +114,7 @@ export default function DashboardScreen({ navigation }: any) {
         console.log('📊 Loading dashboard...');
         
         try {
-            // Load holdings first
+            // Load holdings
             try {
                 console.log('📊 Fetching holdings...');
                 const holdingsResponse = await getHoldings();
@@ -121,11 +123,8 @@ export default function DashboardScreen({ navigation }: any) {
                     const holdingsData = holdingsResponse.holdings || [];
                     console.log(`✅ Loaded ${holdingsData.length} holdings`);
                     setHoldings(holdingsData);
-
-                    // Reset JWT error count on success
                     setJwtErrorCount(0);
 
-                    // Load current prices for holdings to get today's change%
                     if (holdingsData.length > 0) {
                         await loadHoldingsPrices(holdingsData);
                     }
@@ -133,7 +132,6 @@ export default function DashboardScreen({ navigation }: any) {
             } catch (error: any) {
                 console.error('❌ Error loading holdings:', error);
                 
-                // Check if it's a JWT error
                 if (error.message?.includes('Invalid token') || 
                     error.message?.includes('jwt') ||
                     error.response?.data?.error?.includes('token')) {
@@ -142,7 +140,6 @@ export default function DashboardScreen({ navigation }: any) {
                     const newCount = jwtErrorCount + 1;
                     setJwtErrorCount(newCount);
                     
-                    // After 3 JWT errors, auto-clear and logout
                     if (newCount >= 3) {
                         console.log('🚨 Too many JWT errors - clearing storage and logging out');
                         Alert.alert(
@@ -176,7 +173,7 @@ export default function DashboardScreen({ navigation }: any) {
                 console.error('❌ Error loading portfolio history:', error);
             }
 
-            // Load watchlist from backend
+            // Load watchlist
             try {
                 console.log('⭐ Fetching watchlist...');
                 const watchlistResponse = await getWatchlist();
@@ -353,47 +350,66 @@ export default function DashboardScreen({ navigation }: any) {
         });
     };
 
+    // ✅ FIXED: Delete also removes from saved order
     const handleDelete = async (symbol: string) => {
         try {
             await removeFromWatchlist(symbol);
-            setWatchlist((prev) => prev.filter((item) => item.symbol !== symbol));
+            const newWatchlist = watchlist.filter((item) => item.symbol !== symbol);
+            setWatchlist(newWatchlist);
+            
+            // ✅ Update saved order
+            const newOrder = newWatchlist.map(item => item.symbol);
+            await saveWatchlistOrder(newOrder);
+            
+            console.log('🗑️ Deleted', symbol, 'and updated saved order');
         } catch (error) {
             console.error('Error removing from watchlist:', error);
         }
     };
 
-    // ✅ NEW: Reordering functions
     const handleLongPress = (symbol: string) => {
         console.log('🔄 Reordering mode activated for:', symbol);
         setReorderingSymbol(symbol);
     };
 
-    const handleMoveUp = (symbol: string) => {
+    // ✅ FIXED: Async function with immediate persistence
+    const handleMoveUp = async (symbol: string) => {
         const currentIndex = watchlist.findIndex(w => w.symbol === symbol);
-        if (currentIndex <= 0) return; // Already at top
+        if (currentIndex <= 0) return;
         
         const newWatchlist = [...watchlist];
         const temp = newWatchlist[currentIndex];
         newWatchlist[currentIndex] = newWatchlist[currentIndex - 1];
         newWatchlist[currentIndex - 1] = temp;
         
+        // ✅ Update state immediately
         setWatchlist(newWatchlist);
-        saveWatchlistOrder(newWatchlist.map(w => w.symbol));
-        console.log('⬆️ Moved', symbol, 'up');
+        
+        // ✅ Save to storage immediately with await
+        const newOrder = newWatchlist.map(w => w.symbol);
+        await saveWatchlistOrder(newOrder);
+        
+        console.log('⬆️ Moved', symbol, 'up and saved');
     };
 
-    const handleMoveDown = (symbol: string) => {
+    // ✅ FIXED: Async function with immediate persistence
+    const handleMoveDown = async (symbol: string) => {
         const currentIndex = watchlist.findIndex(w => w.symbol === symbol);
-        if (currentIndex >= watchlist.length - 1) return; // Already at bottom
+        if (currentIndex >= watchlist.length - 1) return;
         
         const newWatchlist = [...watchlist];
         const temp = newWatchlist[currentIndex];
         newWatchlist[currentIndex] = newWatchlist[currentIndex + 1];
         newWatchlist[currentIndex + 1] = temp;
         
+        // ✅ Update state immediately
         setWatchlist(newWatchlist);
-        saveWatchlistOrder(newWatchlist.map(w => w.symbol));
-        console.log('⬇️ Moved', symbol, 'down');
+        
+        // ✅ Save to storage immediately with await
+        const newOrder = newWatchlist.map(w => w.symbol);
+        await saveWatchlistOrder(newOrder);
+        
+        console.log('⬇️ Moved', symbol, 'down and saved');
     };
 
     const handleCancelReorder = () => {
@@ -428,7 +444,6 @@ export default function DashboardScreen({ navigation }: any) {
     const profitLossPercent = ((profitLoss / initialValue) * 100).toFixed(2);
     const isPositive = profitLoss >= 0;
 
-    // Separate holdings into stocks and crypto
     const stockHoldings = holdings.filter(h => h.type === 'stock');
     const cryptoHoldings = holdings.filter(h => h.type === 'crypto');
 
@@ -503,10 +518,9 @@ export default function DashboardScreen({ navigation }: any) {
                     </Text>
                 </View>
 
-                {/* Holdings Section - SEPARATE HEADERS */}
+                {/* Holdings Section */}
                 {holdings.length > 0 && (
                     <View style={styles.holdingsSection}>
-                        {/* Stocks Section */}
                         {stockHoldings.length > 0 && (
                             <>
                                 <Text style={styles.sectionTitle}>Stocks / ETFs</Text>
@@ -551,7 +565,6 @@ export default function DashboardScreen({ navigation }: any) {
                             </>
                         )}
 
-                        {/* Crypto Section */}
                         {cryptoHoldings.length > 0 && (
                             <>
                                 <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Crypto</Text>
@@ -598,12 +611,12 @@ export default function DashboardScreen({ navigation }: any) {
                     </View>
                 )}
 
-                {/* ⭐⭐⭐ REALIZED P&L CARD - BETWEEN HOLDINGS AND WATCHLIST ⭐⭐⭐ */}
+                {/* Realized P&L Card */}
                 <RealizedPLCard 
                     onPress={() => navigation.navigate('RealizedPL')}
                 />
 
-                {/* Watchlist Section - COLLAPSIBLE */}
+                {/* Watchlist Section */}
                 <View style={styles.watchlistSection}>
                     <Text style={styles.sectionTitle}>Watchlist</Text>
                     <Text style={styles.swipeHint}>Swipe left to remove • Long press to reorder</Text>
@@ -712,7 +725,6 @@ export default function DashboardScreen({ navigation }: any) {
                                             </TouchableOpacity>
                                         </Swipeable>
                                         
-                                        {/* ✅ REORDER CONTROLS */}
                                         {isReordering && (
                                             <View style={styles.reorderControls}>
                                                 <TouchableOpacity
@@ -743,7 +755,6 @@ export default function DashboardScreen({ navigation }: any) {
                                 );
                             })}
                             
-                            {/* Load More Button */}
                             {visibleWatchlistCount < watchlist.length && (
                                 <TouchableOpacity
                                     style={styles.loadMoreButton}
@@ -755,7 +766,6 @@ export default function DashboardScreen({ navigation }: any) {
                                 </TouchableOpacity>
                             )}
                             
-                            {/* Show Less Button */}
                             {visibleWatchlistCount > 5 && (
                                 <TouchableOpacity
                                     style={styles.collapseButton}
@@ -1047,7 +1057,6 @@ const styles = StyleSheet.create({
     bottomSpacer: {
         height: 100,
     },
-    // ✅ REORDER CONTROLS
     watchlistItemReordering: {
         backgroundColor: '#1a1a1a',
         borderBottomColor: '#333',
