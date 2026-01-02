@@ -192,10 +192,13 @@ export default function RealizedPLScreen({ navigation }: any) {
     const isProfit = hasPLData && pl >= 0;
     
     const date = new Date(item.createdAt);
-    const formattedDate = date.toLocaleDateString('en-US', {
+    const formattedDate = date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
     });
 
     return (

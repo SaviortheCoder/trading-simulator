@@ -1,7 +1,3 @@
-// ============================================
-// WATCHLIST MODEL - User's watched assets
-// ============================================
-
 const mongoose = require('mongoose');
 
 const watchlistItemSchema = new mongoose.Schema({
@@ -18,6 +14,10 @@ const watchlistItemSchema = new mongoose.Schema({
     type: String,
     enum: ['stock', 'crypto'],
     default: 'stock',
+  },
+  order: {
+    type: Number,
+    default: 0,
   },
   addedAt: {
     type: Date,
@@ -63,6 +63,7 @@ watchlistSchema.methods.addItem = function(symbol, name, type = 'stock') {
       symbol: symbol.toUpperCase(),
       name,
       type,
+      order: this.items.length,
     });
   }
   return this;

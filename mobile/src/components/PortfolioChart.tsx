@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import TimeframeSelector, { Timeframe } from './TimeframeSelector';
@@ -10,17 +10,19 @@ interface PortfolioChartProps {
   data: Array<{ timestamp: number; price: number }>;
   isPositive: boolean;
   showTimeframeSelector?: boolean;
+  selectedTimeframe?: Timeframe;  // ← ADD THIS LINE
 }
 
 export default function PortfolioChart({ 
   data, 
   isPositive,
   showTimeframeSelector = true,
+  selectedTimeframe = '1D',  // ← ADD THIS LINE
   onTimeframeChange 
 }: PortfolioChartProps) {
-  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('1M');
 
-  useEffect(() => {
+  // ✅ FIXED: Only call when user clicks, not on mount
+  const handleTimeframeSelect = (timeframe: Timeframe) => {
     if (onTimeframeChange) {
       const daysMap = {
         'live': 1,
@@ -31,9 +33,9 @@ export default function PortfolioChart({
         '6M': 180,
         '1Y': 365,
       };
-      onTimeframeChange(selectedTimeframe, daysMap[selectedTimeframe]);
+      onTimeframeChange(timeframe, daysMap[timeframe]);
     }
-  }, [selectedTimeframe]);
+  };
 
   if (!data || data.length < 2) {
     return (
@@ -41,7 +43,7 @@ export default function PortfolioChart({
         {showTimeframeSelector && (
           <TimeframeSelector
             selected={selectedTimeframe}
-            onSelect={setSelectedTimeframe}
+            onSelect={handleTimeframeSelect}
           />
         )}
         <View style={[styles.placeholder, isPositive ? styles.chartPositive : styles.chartNegative]}>
@@ -83,7 +85,7 @@ export default function PortfolioChart({
       {showTimeframeSelector && (
         <TimeframeSelector
           selected={selectedTimeframe}
-          onSelect={setSelectedTimeframe}
+          onSelect={handleTimeframeSelect}
         />
       )}
       <View style={styles.container}>

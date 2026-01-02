@@ -53,29 +53,29 @@ export default function OrderConfirmationScreen({ route, navigation }: any) {
           'Order Complete',
           `Successfully bought ${shares.toFixed(6)} ${symbol}`,
           [{ 
-            text: 'OK', 
+            text: 'View Asset', 
             onPress: () => {
-              // Navigate back to the root of the stack
-              navigation.navigate('Home', { screen: 'Dashboard' });
+              // Pop back to AssetDetailScreen (removes confirmation screens from stack)
+              navigation.navigate('AssetDetail', { symbol, name, type });
             }
           }]
         );
       } else {
-        await sellAsset(symbol, shares, currentPrice);
+        await sellAsset(symbol, shares, currentPrice, name, type);
         const message = isSellingAll 
           ? `Successfully sold all ${shares.toFixed(6)} ${symbol} (100% of holdings)`
           : `Successfully sold ${shares.toFixed(6)} ${symbol}`;
-        Alert.alert(
-          'Order Complete',
-          message,
-          [{ 
-            text: 'OK', 
-            onPress: () => {
-              // Navigate back to the root of the stack
-              navigation.navigate('Home', { screen: 'Dashboard' });
-            }
-          }]
-        );
+          Alert.alert(
+            'Order Complete',
+            message,
+            [{ 
+              text: 'View Asset', 
+              onPress: () => {
+                // Pop back to AssetDetailScreen
+                navigation.navigate('AssetDetail', { symbol, name, type });
+              }
+            }]
+          );
       }
     } catch (error: any) {
       console.error('Order submission error:', error);

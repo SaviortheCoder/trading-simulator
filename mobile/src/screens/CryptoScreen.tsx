@@ -82,6 +82,7 @@ const CryptoScreen = () => {
   
   const [holdingsExpanded, setHoldingsExpanded] = useState(true);
   const [visibleCryptoCount, setVisibleCryptoCount] = useState(5);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('1D');
   
   // ✅ NEW: Reordering state
   const [reorderingSymbol, setReorderingSymbol] = useState<string | null>(null);
@@ -207,6 +208,7 @@ const CryptoScreen = () => {
 
   const handleTimeframeChange = (timeframe: Timeframe, days: number) => {
     console.log(`Loading ${days} days of crypto portfolio data`);
+    setSelectedTimeframe(timeframe);  // ← Add this line
     loadCryptos(days);
   };
 
@@ -414,6 +416,7 @@ const CryptoScreen = () => {
                       data={portfolioHistory} 
                       isPositive={isPortfolioPositive}
                       onTimeframeChange={handleTimeframeChange}
+                      selectedTimeframe={selectedTimeframe}
                     />
                   ) : (
                     <View style={styles.chartPlaceholder}>

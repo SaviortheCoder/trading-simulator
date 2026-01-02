@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native'; 
 import { useAuthStore } from '../store/authStore';
 import { 
   getStockPrice, 
@@ -38,7 +39,9 @@ interface Transaction {
   quantity: number;
   price: number;
   totalAmount: number;
-  timestamp: string;
+  createdAt: string;  // ← CORRECT FIELD NAME (matches MongoDB)
+  realizedPL?: number;  // Optional - only exists on sells
+  realizedPLPercent?: number;  // Optional - only exists on sells
 }
 
 export default function AssetDetailScreen({ route, navigation }: any) {
@@ -55,14 +58,19 @@ export default function AssetDetailScreen({ route, navigation }: any) {
   // ✅ NEW: Watchlist state
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [checkingWatchlist, setCheckingWatchlist] = useState(true);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('1D');
 
-  useEffect(() => {
-    loadAssetData();
-    loadHoldingData();
-    loadTransactionHistory();
-    loadTotalPortfolioValue();
-    checkWatchlistStatus(); // ✅ NEW
-  }, []);
+  // ✅ Auto-refresh when returning from trade screen
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 AssetDetailScreen focused - refreshing data');
+      loadAssetData();
+      loadHoldingData();
+      loadTransactionHistory();
+      loadTotalPortfolioValue();
+      checkWatchlistStatus();
+    }, [symbol])
+  );
 
   // ✅ NEW: Check if already in watchlist
   const checkWatchlistStatus = async () => {
@@ -167,6 +175,7 @@ export default function AssetDetailScreen({ route, navigation }: any) {
 
   const handleTimeframeChange = (timeframe: Timeframe, days: number) => {
     console.log(`Loading ${days} days of data for ${timeframe}`);
+    setSelectedTimeframe(timeframe);  // ← ADD THIS LINE
     loadPriceHistory(days);
   };
 
@@ -204,7 +213,7 @@ export default function AssetDetailScreen({ route, navigation }: any) {
   };
 
   const handleBuy = () => {
-    navigation.navigate('SimplifiedTrade', {
+    navigation.navigate('TradeConfirmation', {
       symbol,
       name: name || symbol,
       type,
@@ -220,7 +229,7 @@ export default function AssetDetailScreen({ route, navigation }: any) {
       return;
     }
     
-    navigation.navigate('SimplifiedTrade', {
+    navigation.navigate('TradeConfirmation', {
       symbol,
       name: name || symbol,
       type,
@@ -320,11 +329,12 @@ export default function AssetDetailScreen({ route, navigation }: any) {
 
         {/* Price Chart */}
         <View style={styles.chartSpacing}>
-          <PortfolioChart 
-            data={priceHistory} 
-            isPositive={isPositive}
-            onTimeframeChange={handleTimeframeChange}
-          />
+        <PortfolioChart 
+  data={priceHistory} 
+  isPositive={isPositive}
+  onTimeframeChange={handleTimeframeChange}
+  selectedTimeframe={selectedTimeframe}  // ← ADD THIS LINE
+/>
         </View>
 
         {/* Your Position Section */}
@@ -512,11 +522,14 @@ export default function AssetDetailScreen({ route, navigation }: any) {
                     Market {tx.action}
                   </Text>
                   <Text style={styles.historyDate}>
-                    {new Date(tx.timestamp).toLocaleDateString('en-US', { 
-                      month: 'short', 
-                      day: 'numeric', 
-                      year: 'numeric' 
-                    })}
+                  {new Date(tx.createdAt).toLocaleString('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true
+})}
                   </Text>
                 </View>
                 <View style={styles.historyRight}>

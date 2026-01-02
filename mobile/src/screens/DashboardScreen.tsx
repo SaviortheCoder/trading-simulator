@@ -1,7 +1,7 @@
 // ============================================
-// DASHBOARD SCREEN - COMPLETE WITH ALL FIXES
-// - Instant reorder persistence (async/await)
-// - Delete updates saved order
+// DASHBOARD SCREEN - BACKEND REORDERING
+// - Order saved to MongoDB (not AsyncStorage)
+// - Backend is single source of truth
 // - All existing features preserved
 // ============================================
 
@@ -26,6 +26,7 @@ import {
     logout,
     getWatchlist,
     removeFromWatchlist,
+    reorderWatchlist,  // ✅ NEW: Backend reorder function
     getBulkPrices,
     getHoldings,
     getPortfolioHistory,
@@ -35,7 +36,6 @@ import PortfolioChart from '../components/PortfolioChart';
 import Sparkline from '../components/Sparkline';
 import RealizedPLCard from '../components/RealizedPLCard';
 import { Timeframe } from '../components/TimeframeSelector';
-import { saveWatchlistOrder, loadWatchlistOrder, applyCustomOrder } from '../utils/orderStorage';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -73,6 +73,7 @@ export default function DashboardScreen({ navigation }: any) {
     const [visibleWatchlistCount, setVisibleWatchlistCount] = useState(5);
     const [jwtErrorCount, setJwtErrorCount] = useState(0);
     const [reorderingSymbol, setReorderingSymbol] = useState<string | null>(null);
+    const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('1D');
     const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
 
     useEffect(() => {
@@ -188,16 +189,14 @@ export default function DashboardScreen({ navigation }: any) {
                     
                     console.log(`✅ Loaded ${items.length} watchlist items`);
                     
-                    // Apply custom order
-                    const customOrder = await loadWatchlistOrder();
-                    const orderedItems = applyCustomOrder(items, customOrder);
-                    
-                    setWatchlist(orderedItems);
+                    // ✅ CHANGED: Backend already returns items sorted by order field
+                    // No need for local storage anymore!
+                    setWatchlist(items);
                     setJwtErrorCount(0);
 
-                    if (orderedItems.length > 0) {
-                        await loadPricesAllAtOnce(orderedItems);
-                        await loadSparklines(orderedItems);
+                    if (items.length > 0) {
+                        await loadPricesAllAtOnce(items);
+                        await loadSparklines(items);
                     }
                 }
             } catch (error: any) {
@@ -237,6 +236,7 @@ export default function DashboardScreen({ navigation }: any) {
 
     const handleTimeframeChange = (timeframe: Timeframe, days: number) => {
         console.log(`Loading ${days} days of data for ${timeframe}`);
+        setSelectedTimeframe(timeframe);  // ← ADD THIS LINE
         loadDashboard(days);
     };
 
@@ -350,18 +350,14 @@ export default function DashboardScreen({ navigation }: any) {
         });
     };
 
-    // ✅ FIXED: Delete also removes from saved order
+    // ✅ CHANGED: Simpler delete - no local storage
     const handleDelete = async (symbol: string) => {
         try {
             await removeFromWatchlist(symbol);
             const newWatchlist = watchlist.filter((item) => item.symbol !== symbol);
             setWatchlist(newWatchlist);
             
-            // ✅ Update saved order
-            const newOrder = newWatchlist.map(item => item.symbol);
-            await saveWatchlistOrder(newOrder);
-            
-            console.log('🗑️ Deleted', symbol, 'and updated saved order');
+            console.log('🗑️ Deleted', symbol);
         } catch (error) {
             console.error('Error removing from watchlist:', error);
         }
@@ -372,7 +368,7 @@ export default function DashboardScreen({ navigation }: any) {
         setReorderingSymbol(symbol);
     };
 
-    // ✅ FIXED: Async function with immediate persistence
+    // ✅ CHANGED: Save to backend with error handling
     const handleMoveUp = async (symbol: string) => {
         const currentIndex = watchlist.findIndex(w => w.symbol === symbol);
         if (currentIndex <= 0) return;
@@ -382,17 +378,22 @@ export default function DashboardScreen({ navigation }: any) {
         newWatchlist[currentIndex] = newWatchlist[currentIndex - 1];
         newWatchlist[currentIndex - 1] = temp;
         
-        // ✅ Update state immediately
+        // Update state immediately for smooth UX
         setWatchlist(newWatchlist);
         
-        // ✅ Save to storage immediately with await
-        const newOrder = newWatchlist.map(w => w.symbol);
-        await saveWatchlistOrder(newOrder);
-        
-        console.log('⬆️ Moved', symbol, 'up and saved');
+        // Save to backend
+        try {
+            const orderedSymbols = newWatchlist.map(w => w.symbol);
+            await reorderWatchlist(orderedSymbols);
+            console.log('⬆️ Moved', symbol, 'up and saved to backend');
+        } catch (error) {
+            console.error('Error saving watchlist order:', error);
+            // Revert on error
+            setWatchlist(watchlist);
+        }
     };
 
-    // ✅ FIXED: Async function with immediate persistence
+    // ✅ CHANGED: Save to backend with error handling
     const handleMoveDown = async (symbol: string) => {
         const currentIndex = watchlist.findIndex(w => w.symbol === symbol);
         if (currentIndex >= watchlist.length - 1) return;
@@ -402,14 +403,19 @@ export default function DashboardScreen({ navigation }: any) {
         newWatchlist[currentIndex] = newWatchlist[currentIndex + 1];
         newWatchlist[currentIndex + 1] = temp;
         
-        // ✅ Update state immediately
+        // Update state immediately for smooth UX
         setWatchlist(newWatchlist);
         
-        // ✅ Save to storage immediately with await
-        const newOrder = newWatchlist.map(w => w.symbol);
-        await saveWatchlistOrder(newOrder);
-        
-        console.log('⬇️ Moved', symbol, 'down and saved');
+        // Save to backend
+        try {
+            const orderedSymbols = newWatchlist.map(w => w.symbol);
+            await reorderWatchlist(orderedSymbols);
+            console.log('⬇️ Moved', symbol, 'down and saved to backend');
+        } catch (error) {
+            console.error('Error saving watchlist order:', error);
+            // Revert on error
+            setWatchlist(watchlist);
+        }
     };
 
     const handleCancelReorder = () => {
@@ -502,10 +508,11 @@ export default function DashboardScreen({ navigation }: any) {
 
                 {/* Portfolio Chart */}
                 <PortfolioChart
-                    data={portfolioHistory}
-                    isPositive={isPositive}
-                    onTimeframeChange={handleTimeframeChange}
-                />
+    data={portfolioHistory}
+    isPositive={isPositive}
+    onTimeframeChange={handleTimeframeChange}
+    selectedTimeframe={selectedTimeframe}  // ← ADD THIS LINE
+/>
 
                 {/* Buying Power */}
                 <View style={styles.buyingPowerCard}>

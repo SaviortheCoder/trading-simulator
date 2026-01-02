@@ -10,7 +10,7 @@ const transactionSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
+    required: false,
   },
   symbol: {
     type: String,
@@ -18,7 +18,7 @@ const transactionSchema = new mongoose.Schema({
   },
   name: {
     type: String,
-    required: true,
+    required: false,
   },
   action: {
     type: String,

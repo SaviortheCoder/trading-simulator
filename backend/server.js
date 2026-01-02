@@ -266,7 +266,7 @@ app.use('/api/prices', priceRoutes);
 app.use('/api/trade', authMiddleware, tradeRoutes);
 app.use('/api/portfolio', authMiddleware, portfolioRoutes);
 app.use('/api/watchlist', authMiddleware, watchlistRoutes);
-app.use('/api/historical', authMiddleware, historicalRoutes);
+app.use('/api/historical', historicalRoutes);
 
 // ============================================
 // ERROR HANDLING - Catch-all error handlers

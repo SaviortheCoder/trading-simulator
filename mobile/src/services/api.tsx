@@ -214,12 +214,17 @@ export async function getWatchlist() {
 }
 
 export async function addToWatchlist(symbol: string, name: string, type: string = 'stock') {
-  const response = await apiClient.post('/api/watchlist', { symbol, name, type });
+  const response = await apiClient.post('/api/watchlist/add', { symbol, name, type });  // ← ADD /add
   return response.data;
 }
 
 export async function removeFromWatchlist(symbol: string) {
   const response = await apiClient.delete(`/api/watchlist/${symbol}`);
+  return response.data;
+}
+
+export async function reorderWatchlist(orderedSymbols: string[]) {
+  const response = await apiClient.put('/api/watchlist/reorder', { orderedSymbols });
   return response.data;
 }
 
@@ -233,16 +238,18 @@ export async function buyAsset(symbol: string, quantity: number, price: number, 
     quantity,
     price,
     name,
-    type,
+    assetType: type,
   });
   return response.data;
 }
 
-export async function sellAsset(symbol: string, quantity: number, price: number) {
+export async function sellAsset(symbol: string, quantity: number, price: number, name?: string, type?: string) {
   const response = await apiClient.post('/api/trade/sell', {
     symbol,
     quantity,
     price,
+    name,
+    assetType: type,
   });
   return response.data;
 }
@@ -294,6 +301,11 @@ export async function getCryptoHistory(symbol: string, days: number = 30) {
 export async function getAssetHistory(symbol: string, type: string, days: number = 7) {
   const endpoint = type === 'crypto' ? 'crypto' : 'stock';
   const response = await apiClient.get(`/api/historical/${endpoint}/${symbol}?days=${days}`);
+  return response.data;
+}
+
+export async function getRealizedPL(period: string = '1M') {
+  const response = await apiClient.get(`/api/trade/realized-pl?period=${period}`);
   return response.data;
 }
 

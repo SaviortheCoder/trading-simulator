@@ -3,6 +3,7 @@
 // Home, Crypto, Search, Settings
 // ============================================
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -20,126 +21,27 @@ import SettingsScreen from '../screens/SettingsScreen';
 import AssetDetailScreen from '../screens/AssetDetailScreen';
 import TradeConfirmationScreen from '../screens/TradeConfirmationScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
-import RealizedPLScreen from '../screens/RealizedPLScreen'; // ⭐ NEW
-import TransactionHistoryScreen from '../screens/TransactionHistoryScreen'; // ⭐ NEW
+import RealizedPLScreen from '../screens/RealizedPLScreen';
+import TransactionHistoryScreen from '../screens/TransactionHistoryScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// Robinhood-style Tab Icons
+// Robinhood-style Tab Icons (Clean & Professional)
 const HomeIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
-    <View style={{ width: 20, height: 18 }}>
-      <View style={{ 
-        position: 'absolute',
-        width: 20,
-        height: 10,
-        top: 0,
-        borderLeftWidth: 10,
-        borderRightWidth: 10,
-        borderBottomWidth: 10,
-        borderLeftColor: 'transparent',
-        borderRightColor: 'transparent',
-        borderBottomColor: color,
-      }} />
-      <View style={{ 
-        position: 'absolute',
-        width: 16,
-        height: 10,
-        bottom: 0,
-        left: 2,
-        borderWidth: 2,
-        borderColor: color,
-        borderTopWidth: 0,
-      }} />
-    </View>
-  </View>
+  <Ionicons name="home-outline" size={24} color={color} />
 );
 
 const CryptoIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
-    <View style={{ 
-      width: 16, 
-      height: 18, 
-      borderWidth: 2,
-      borderColor: color,
-      borderRadius: 8,
-      borderLeftWidth: 0,
-      position: 'relative',
-    }}>
-      <View style={{ 
-        position: 'absolute',
-        width: 16,
-        height: 2,
-        backgroundColor: color,
-        top: 7,
-        left: -2,
-      }} />
-    </View>
-    <View style={{ 
-      position: 'absolute',
-      width: 2,
-      height: 20,
-      backgroundColor: color,
-      left: 9,
-    }} />
-  </View>
+  <Ionicons name="logo-bitcoin" size={26} color={color} />
 );
 
 const SearchIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
-    <View style={{ 
-      width: 14, 
-      height: 14, 
-      borderRadius: 7, 
-      borderWidth: 2, 
-      borderColor: color,
-    }} />
-    <View style={{ 
-      position: 'absolute',
-      width: 6, 
-      height: 2, 
-      backgroundColor: color,
-      bottom: 4,
-      right: 4,
-      transform: [{ rotate: '45deg' }]
-    }} />
-  </View>
+  <Ionicons name="search-outline" size={24} color={color} />
 );
 
 const SettingsIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
-    <View style={{ 
-      width: 16, 
-      height: 16, 
-      borderRadius: 8, 
-      borderWidth: 2.5, 
-      borderColor: color,
-    }} />
-    <View style={{ 
-      position: 'absolute',
-      width: 6, 
-      height: 6, 
-      borderRadius: 3, 
-      backgroundColor: color,
-    }} />
-    {[0, 90, 180, 270].map((rotation, i) => (
-      <View 
-        key={i}
-        style={{ 
-          position: 'absolute',
-          width: 4,
-          height: 6,
-          backgroundColor: color,
-          transform: [
-            { translateY: -11 },
-            { rotate: `${rotation}deg` },
-            { translateY: 11 },
-          ]
-        }} 
-      />
-    ))}
-  </View>
+  <Ionicons name="settings-outline" size={24} color={color} />
 );
 
 const HomeStack = createNativeStackNavigator();
@@ -150,7 +52,7 @@ function HomeStackScreen() {
       <HomeStack.Screen name="Dashboard" component={DashboardScreen} />
       <HomeStack.Screen name="AssetDetail" component={AssetDetailScreen} />
       <HomeStack.Screen 
-        name="SimplifiedTrade" 
+        name="TradeConfirmation" 
         component={TradeConfirmationScreen}
         options={{ 
           presentation: 'modal',
@@ -165,7 +67,6 @@ function HomeStackScreen() {
           animation: 'slide_from_bottom'
         }}
       />
-      {/* ⭐ NEW - Realized P&L Screen */}
       <HomeStack.Screen 
         name="RealizedPL" 
         component={RealizedPLScreen}
@@ -183,7 +84,7 @@ function CryptoStackScreen() {
       <CryptoStack.Screen name="CryptoMain" component={CryptoScreen} />
       <CryptoStack.Screen name="AssetDetail" component={AssetDetailScreen} />
       <CryptoStack.Screen 
-        name="SimplifiedTrade" 
+        name="TradeConfirmation" 
         component={TradeConfirmationScreen}
         options={{ 
           presentation: 'modal',
@@ -210,7 +111,7 @@ function SearchStackScreen() {
       <SearchStack.Screen name="SearchMain" component={SearchScreen} />
       <SearchStack.Screen name="AssetDetail" component={AssetDetailScreen} />
       <SearchStack.Screen 
-        name="SimplifiedTrade" 
+        name="TradeConfirmation" 
         component={TradeConfirmationScreen}
         options={{ 
           presentation: 'modal',
@@ -235,7 +136,6 @@ function SettingsStackScreen() {
   return (
     <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
       <SettingsStack.Screen name="SettingsMain" component={SettingsScreen} />
-      {/* ⭐ NEW - Transaction History Screen */}
       <SettingsStack.Screen 
         name="TransactionHistory" 
         component={TransactionHistoryScreen}
